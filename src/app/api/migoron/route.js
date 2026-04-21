@@ -20,7 +20,22 @@ export async function POST(request) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     // STEP1: Google検索で情報収集
-    const searchPrompt = `${whenLabel}(${dateLabel})に${regionLabel}で${flowerLabel}${extraPlace}を見に行く場合のおすすめスポットを3件、Google検索で調べてください。各スポットの開花状況、土日の天気予報と気温(最高/最低)を調べてください。検索時刻: ${nowStr}`;
+    const searchPrompt = `以下の条件でお花見スポットを必ず3件以上調べてください。
+
+条件:
+- 日付: ${whenLabel}(${dateLabel})
+- 地域: ${regionLabel}
+- 花: ${flowerLabel}${extraPlace}
+- 検索時刻: ${nowStr}
+
+各スポットについて以下を詳しく調べてください:
+1. スポット名と所在地
+2. 現在の開花状況(満開/見頃/散り始めなど)
+3. ${dateLabel}の土曜・日曜の天気予報(晴/曇/雨)
+4. 最高気温と最低気温
+5. 見どころ・おすすめポイント
+
+必ず3件のスポットを詳しく調べて報告してください。`;
 
     const step1Res = await fetch(url, {
       method: 'POST',
