@@ -160,7 +160,7 @@ export default function MigoronNavi() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', padding: '0 4px' }}>
             <div style={{ fontSize: '22px', fontWeight: 500, color: 'var(--mn-ink)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--mn-accent)' }}></span>
-              ミゴロンナビ
+              パステル花予報 ミゴロンナビ
             </div>
             <div style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '999px', background: 'rgba(255,255,255,0.85)', color: 'var(--mn-ink)' }}>
               {theme.label} · {targetMonth}月
