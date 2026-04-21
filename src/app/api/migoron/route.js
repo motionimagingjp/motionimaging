@@ -17,119 +17,112 @@ export async function POST(request) {
     const nowStr = `${jstNow.getFullYear()}/${jstNow.getMonth() + 1}/${jstNow.getDate()} ${String(jstNow.getHours()).padStart(2, '0')}:${String(jstNow.getMinutes()).padStart(2, '0')} JST`;
     const extraPlace = freetext ? `・${freetext}` : '';
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    // STEP1: 軽量モデルでGoogle検索+JSON直接生成を試みる
+    const step1Url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const step2Url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-    // STEP1: Google検索で情報収集
-    const searchPrompt = `以下の条件でお花見スポットを必ず3件以上調べてください。
+    const jsonTemplate = `{"timestamp":"${nowStr}","sourceNote":"3ソース検証済","spots":[{"name":"スポット名","location":"場所","migoron_score":88,"flower_score":95,"saturday":{"label":"4/26(土)","weather":"晴","temp":"20/5"},"sunday":{"label":"4/27(日)","weather":"曇","temp":"18/6"},"info":"見どころ","warning":"","tags":["家族","撮影"]}]}`;
 
-条件:
-- 日付: ${whenLabel}(${dateLabel})
-- 地域: ${regionLabel}
-- 花: ${flowerLabel}${extraPlace}
-- 検索時刻: ${nowStr}
+    const searchPrompt = `${whenLabel}(${dateLabel})に${regionLabel}で${flowerLabel}${extraPlace}を楽しめるお花見スポットを、Google検索で3件調べて以下のJSON形式のみで返してください。説明文不要。
 
-各スポットについて以下を詳しく調べてください:
-1. スポット名と所在地
-2. 現在の開花状況(満開/見頃/散り始めなど)
-3. ${dateLabel}の土曜・日曜の天気予報(晴/曇/雨)
-4. 最高気温と最低気温
-5. 見どころ・おすすめポイント
+${jsonTemplate}
 
-必ず3件のスポットを詳しく調べて報告してください。`;
+スコア: flower_score(満開=95-100,見頃=80-95,散り始め=60-80), migoron_score(花50%+天気30%+気温20%), 天気(晴=30,晴曇=25,曇=18,雨=5点/30点), 気温15-23℃=満点
+検索時刻: ${nowStr}`;
 
-    const step1Res = await fetch(url, {
+    const step1Res = await fetch(step1Url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: searchPrompt }] }],
         tools: [{ google_search: {} }],
-        generationConfig: { temperature: 1.0, maxOutputTokens: 2048 },
+        generationConfig: { temperature: 1.0, maxOutputTokens: 4096 },
       }),
     });
 
-    if (!step1Res.ok) {
-      const errText = await step1Res.text();
-      console.error('Step1 error:', errText);
-      return Response.json({ error: `検索エラー: ${step1Res.status}` }, { status: 500 });
+    let result = null;
+
+    if (step1Res.ok) {
+      const step1Data = await step1Res.json();
+      const parts = step1Data?.candidates?.[0]?.content?.parts || [];
+      const rawText = parts.filter(p => typeof p.text === 'string').map(p => p.text).join('').trim();
+
+      // JSON抽出を試みる
+      result = tryParseJSON(rawText);
+      if (result) {
+        return Response.json(result);
+      }
+
+      // STEP2: 収集テキストをSTEP2でJSON変換
+      const jsonPrompt = `以下の花見情報をJSONのみで返してください。説明文不要。
+
+${rawText}
+
+形式: ${jsonTemplate}`;
+
+      const step2Res = await fetch(step2Url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: jsonPrompt }] }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 8192,
+            responseMimeType: 'application/json',
+          },
+        }),
+      });
+
+      if (step2Res.ok) {
+        const step2Data = await step2Res.json();
+        const rawText2 = (step2Data?.candidates?.[0]?.content?.parts || [])
+          .filter(p => typeof p.text === 'string').map(p => p.text).join('').trim();
+        result = tryParseJSON(rawText2);
+        if (result) {
+          return Response.json(result);
+        }
+      }
     }
 
-    const step1Data = await step1Res.json();
-    console.log('Step1 candidates count:', step1Data?.candidates?.length);
-    console.log('Step1 parts count:', step1Data?.candidates?.[0]?.content?.parts?.length);
-
-    // 全partsのテキストを収集してログ
-    const allParts = step1Data?.candidates?.[0]?.content?.parts || [];
-    console.log('Step1 parts types:', allParts.map(p => Object.keys(p).join(',')).join(' | '));
-
-    // テキストpartsのみ抽出して最後のものを使用
-    const textParts = allParts.filter(p => typeof p.text === 'string' && p.text.length > 0);
-    console.log('Step1 text parts count:', textParts.length);
-
-    const searchResult = textParts.map(p => p.text).join('\n');
-    console.log('Step1 result length:', searchResult.length);
-
-    if (!searchResult) {
-      return Response.json({ error: '検索結果が取得できませんでした' }, { status: 500 });
-    }
-
-    // STEP2: JSON変換(google_searchなし + responseMimeType: json)
-    const jsonPrompt = `以下の花見スポット情報をJSONに変換してください。
-
-${searchResult}
-
-以下の形式のJSONのみ返してください:
-{"timestamp":"${nowStr}","sourceNote":"3ソース検証済","spots":[{"name":"スポット名","location":"場所","migoron_score":88,"flower_score":95,"saturday":{"label":"4/26(土)","weather":"晴","temp":"20/5"},"sunday":{"label":"4/27(日)","weather":"曇","temp":"18/6"},"info":"見どころ","warning":"","tags":["家族","撮影"]}]}`;
-
-    const step2Res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: jsonPrompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 8192,
-          responseMimeType: 'application/json',
-        },
-      }),
-    });
-
-    if (!step2Res.ok) {
-      const errText = await step2Res.text();
-      console.error('Step2 error:', errText);
-      return Response.json({ error: `JSON生成エラー: ${step2Res.status}` }, { status: 500 });
-    }
-
-    const step2Data = await step2Res.json();
-    const rawText = (step2Data?.candidates?.[0]?.content?.parts || [])
-      .filter(p => typeof p.text === 'string')
-      .map(p => p.text)
-      .join('')
-      .trim();
-
-    console.log('Step2 raw text (first 200):', rawText.slice(0, 200));
-
-    // コードフェンス除去
-    let jsonText = rawText;
-    const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (fenceMatch) jsonText = fenceMatch[1].trim();
-
-    // 先頭の{から末尾の}まで抽出
-    const si = jsonText.indexOf('{');
-    const ei = jsonText.lastIndexOf('}');
-    if (si >= 0 && ei > si) jsonText = jsonText.substring(si, ei + 1);
-
-    let result;
-    try {
-      result = JSON.parse(jsonText);
-    } catch (e) {
-      console.error('JSON parse error:', e.message, 'Raw:', rawText.slice(0, 300));
-      return Response.json({ error: 'AI応答の解析に失敗しました。もう一度お試しください。' }, { status: 500 });
-    }
-
-    return Response.json(result);
+    return Response.json({ error: 'AI応答の解析に失敗しました。もう一度お試しください。' }, { status: 500 });
 
   } catch (error) {
     console.error('API route error:', error);
     return Response.json({ error: error.message || '予期しないエラー' }, { status: 500 });
+  }
+}
+
+function tryParseJSON(text) {
+  if (!text) return null;
+
+  // コードフェンス除去
+  let s = text;
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fence) s = fence[1].trim();
+
+  // 最初の完結したJSONオブジェクトを抽出(文字列内の括弧を正確にトラッキング)
+  const start = s.indexOf('{');
+  if (start < 0) return null;
+
+  let depth = 0, end = -1, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { esc = false; continue; }
+    if (c === '\\' && inStr) { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+
+  if (end < 0) return null;
+
+  try {
+    const obj = JSON.parse(s.substring(start, end + 1));
+    // spotsが配列で1件以上あれば有効
+    if (obj && Array.isArray(obj.spots) && obj.spots.length > 0) return obj;
+    return null;
+  } catch {
+    return null;
   }
 }
