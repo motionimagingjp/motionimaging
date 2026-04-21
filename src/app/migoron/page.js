@@ -73,6 +73,8 @@ export default function MigoronNavi() {
   const [flower, setFlower] = useState('おまかせ');
   const [freetext, setFreetext] = useState('');
   const [loading, setLoading] = useState(false);
+  const [detailMode, setDetailMode] = useState(false);
+  const [loadMsg, setLoadMsg] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [now] = useState(new Date());
@@ -105,10 +107,23 @@ export default function MigoronNavi() {
     if (!flowers.includes(flower)) setFlower('おまかせ');
   }, [flowers, flower]);
 
+  const loadMessages = [
+    '🌸 花の情報を検索中...',
+    '☁️ 天気予報を確認中...',
+    '📍 スポットを選定中...',
+    '✨ ミゴロン指数を計算中...',
+  ];
+
   const handleSearch = async () => {
     setLoading(true);
     setError(null);
     setResult(null);
+    setLoadMsg(loadMessages[0]);
+    let msgIdx = 0;
+    const msgTimer = setInterval(() => {
+      msgIdx = (msgIdx + 1) % loadMessages.length;
+      setLoadMsg(loadMessages[msgIdx]);
+    }, 4000);
 
     const whenLabel = { weekend: '今週末', nextweekend: '来週末', today: '今日', tomorrow: '明日' }[when];
     const regionLabel = region === 'おまかせ' ? '全国から一番のおすすめ' : `${region}地方`;
@@ -124,6 +139,7 @@ export default function MigoronNavi() {
           regionLabel,
           flowerLabel,
           freetext: freetext.trim(),
+          detailMode,
         }),
       });
       const data = await res.json();
@@ -132,6 +148,7 @@ export default function MigoronNavi() {
     } catch (e) {
       setError(e.message);
     } finally {
+      clearInterval(msgTimer);
       setLoading(false);
     }
   };
@@ -211,18 +228,41 @@ export default function MigoronNavi() {
             </div>
           </Section>
 
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 14px', background: detailMode ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', borderRadius: '999px', border: `0.5px solid ${detailMode ? theme.accent : 'rgba(0,0,0,0.08)'}` }}>
+              <div
+                onClick={() => setDetailMode(!detailMode)}
+                style={{ width: '40px', height: '22px', borderRadius: '999px', background: detailMode ? theme.accent : '#ccc', position: 'relative', transition: 'background 0.2s', flexShrink: 0, cursor: 'pointer' }}
+              >
+                <div style={{ position: 'absolute', top: '3px', left: detailMode ? '21px' : '3px', width: '16px', height: '16px', borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--mn-ink)' }}>詳細モード</div>
+                <div style={{ fontSize: '10px', color: 'var(--mn-ink-soft)' }}>{detailMode ? 'リアルタイム検索(約30秒)' : 'AI予報・高速(約5秒)'}</div>
+              </div>
+            </label>
+          </div>
+
           <button
             onClick={handleSearch}
             disabled={loading}
             style={{
               width: '100%', padding: '14px', fontSize: '15px', fontWeight: 500,
-              background: loading ? '#888' : theme.accent,
+              background: loading ? theme.accent : theme.accent,
               color: '#fff', border: 'none', borderRadius: '999px', cursor: loading ? 'wait' : 'pointer',
-              minHeight: '52px', marginTop: '8px'
+              minHeight: '52px', opacity: loading ? 0.8 : 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px'
             }}
           >
-            {loading ? '検索中...' : 'ミゴロン指数でスポットを探す ↗'}
+            {loading && (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 1s linear infinite' }}>
+                <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="3"/>
+                <path d="M12 2 A10 10 0 0 1 22 12" stroke="white" strokeWidth="3" strokeLinecap="round"/>
+              </svg>
+            )}
+            {loading ? loadMsg : 'ミゴロン指数でスポットを探す ↗'}
           </button>
+          <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '14px', fontSize: '11px', color: 'var(--mn-ink-soft)', flexWrap: 'wrap' }}>
             <span>花</span><span>+</span><span>天気</span><span>+</span><span>気温</span><span>=</span>
