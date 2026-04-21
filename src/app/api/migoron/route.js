@@ -19,106 +19,72 @@ export async function POST(request) {
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-    // STEP1: Google検索で情報収集(テキストで返す)
-    const searchPrompt = `以下の条件でお花見スポットを必ず3件調べてください。
+    const prompt = `You are a Japanese hanami (flower viewing) assistant. Search Google and return ONLY a JSON object. No explanation, no markdown, no code blocks. Just the raw JSON.
 
-条件:
-- 日付: ${whenLabel}(${dateLabel})
-- 地域: ${regionLabel}
-- 花: ${flowerLabel}${extraPlace}
-- 検索時刻: ${nowStr}
+Conditions:
+- Date: ${whenLabel}(${dateLabel})
+- Region: ${regionLabel}
+- Flower: ${flowerLabel}${extraPlace}
+- Search time: ${nowStr}
 
-各スポットについて以下を調べてください:
-1. スポット名と所在地
-2. 現在の開花状況(満開/見頃/散り始めなど)
-3. 土曜・日曜の天気(晴/曇/雨)
-4. 最高気温と最低気温
-5. 見どころ
+Search for 3 spots and return this exact JSON structure:
+{"timestamp":"${nowStr}","sourceNote":"気象庁/ウェザーニュース/ウェザーマップ 3ソース検証済","spots":[{"name":"スポット名","location":"都道府県・場所の説明","migoron_score":88,"flower_score":95,"saturday":{"label":"4/26(土)","weather":"晴","temp":"20/5"},"sunday":{"label":"4/27(日)","weather":"曇","temp":"18/6"},"info":"開花状況と見どころ","warning":"","tags":["家族","撮影"]}]}
 
-必ず3件報告してください。`;
+Score rules:
+- flower_score: full bloom=95-100, peak=80-95, fading=60-80, bud/leaf=30-60
+- migoron_score: flower(50%) + weather(30%) + temp(20%). Both days rain=-10, one day rain=-5
+- weather points: sunny=30, partly cloudy=25, cloudy=18, rainy=5 (out of 30)
+- temp: 15-23C peak = 20pts
 
-    const step1Res = await fetch(url, {
+Return ONLY the JSON. No other text.`;
+
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: searchPrompt }] }],
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
         tools: [{ google_search: {} }],
-        generationConfig: { temperature: 1.0, maxOutputTokens: 3000 },
-      }),
-    });
-
-    if (!step1Res.ok) {
-      const err = await step1Res.text();
-      console.error('Step1 error:', step1Res.status, err.slice(0, 200));
-      return Response.json({ error: `検索エラー: ${step1Res.status}` }, { status: 500 });
-    }
-
-    const step1Data = await step1Res.json();
-    const searchResult = (step1Data?.candidates?.[0]?.content?.parts || [])
-      .filter(p => typeof p.text === 'string')
-      .map(p => p.text)
-      .join('')
-      .trim();
-
-    if (!searchResult) {
-      return Response.json({ error: '検索結果が取得できませんでした' }, { status: 500 });
-    }
-
-    // STEP2: JSON変換(google_searchなし + responseMimeType: json)
-    const jsonPrompt = `以下の花見情報をJSONに変換してください。JSONのみ返してください。
-
-${searchResult}
-
-形式:
-{"timestamp":"${nowStr}","sourceNote":"3ソース検証済","spots":[{"name":"スポット名","location":"場所","migoron_score":88,"flower_score":95,"saturday":{"label":"4/26(土)","weather":"晴","temp":"20/5"},"sunday":{"label":"4/27(日)","weather":"曇","temp":"18/6"},"info":"見どころ","warning":"","tags":["家族","撮影"]}]}
-
-スコア: flower_score(満開=95-100,見頃=80-95,散り始め=60-80), migoron_score(花50%+天気30%+気温20%), 天気(晴=30,晴曇=25,曇=18,雨=5点/30点満点)`;
-
-    const step2Res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: jsonPrompt }] }],
         generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 8192,
-          responseMimeType: 'application/json',
+          temperature: 1.0,
+          maxOutputTokens: 4096,
         },
       }),
     });
 
-    if (!step2Res.ok) {
-      const err = await step2Res.text();
-      console.error('Step2 error:', step2Res.status, err.slice(0, 200));
-      return Response.json({ error: `JSON生成エラー: ${step2Res.status}` }, { status: 500 });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('Gemini error:', res.status, err.slice(0, 200));
+      return Response.json({ error: `API エラー: ${res.status}` }, { status: 500 });
     }
 
-    const step2Data = await step2Res.json();
-    const rawText = (step2Data?.candidates?.[0]?.content?.parts || [])
-      .filter(p => typeof p.text === 'string')
-      .map(p => p.text)
-      .join('')
-      .trim();
+    const data = await res.json();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const rawText = parts.filter(p => typeof p.text === 'string').map(p => p.text).join('').trim();
 
-    const result = tryParseJSON(rawText);
+    const result = extractJSON(rawText);
     if (!result) {
-      console.error('JSON parse failed. Raw:', rawText.slice(0, 300));
+      console.error('JSON extract failed. Raw:', rawText.slice(0, 400));
       return Response.json({ error: 'AI応答の解析に失敗しました。もう一度お試しください。' }, { status: 500 });
     }
 
     return Response.json(result);
 
   } catch (error) {
-    console.error('API route error:', error);
+    console.error('Error:', error);
     return Response.json({ error: error.message || '予期しないエラー' }, { status: 500 });
   }
 }
 
-function tryParseJSON(text) {
+function extractJSON(text) {
   if (!text) return null;
-  let s = text.replace(/```(?:json)?\s*/g, '').replace(/```\s*/g, '').trim();
+
+  // コードフェンス除去
+  let s = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
+  // 最初の{から文字列を正確にトラッキングして完結したJSONを取得
   const start = s.indexOf('{');
   if (start < 0) return null;
+
   let depth = 0, end = -1, inStr = false, esc = false;
   for (let i = start; i < s.length; i++) {
     const c = s[i];
@@ -127,9 +93,14 @@ function tryParseJSON(text) {
     if (c === '"') { inStr = !inStr; continue; }
     if (inStr) continue;
     if (c === '{') depth++;
-    else if (c === '}') { depth--; if (depth === 0) { end = i; break; } }
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
   }
+
   if (end < 0) return null;
+
   try {
     const obj = JSON.parse(s.substring(start, end + 1));
     if (obj && Array.isArray(obj.spots) && obj.spots.length > 0) return obj;
