@@ -45,6 +45,7 @@ Return ONLY JSON.`;
       const data = await res.json();
       const rawText = (data?.candidates?.[0]?.content?.parts || [])
         .filter(p => typeof p.text === 'string').map(p => p.text).join('').trim();
+      console.error('RAW_SIMPLE:', rawText.slice(0, 500));
       const result = extractJSON(rawText);
       if (!result) return Response.json({ error: 'AI応答の解析に失敗しました。もう一度お試しください。' }, { status: 500 });
       return Response.json(result);
@@ -92,6 +93,7 @@ ${searchResult}
       const step2Data = await step2Res.json();
       const rawText = (step2Data?.candidates?.[0]?.content?.parts || [])
         .filter(p => typeof p.text === 'string').map(p => p.text).join('').trim();
+      console.error('RAW_SIMPLE:', rawText.slice(0, 500));
       const result = extractJSON(rawText);
       if (!result) return Response.json({ error: 'AI応答の解析に失敗しました。もう一度お試しください。' }, { status: 500 });
       return Response.json(result);
