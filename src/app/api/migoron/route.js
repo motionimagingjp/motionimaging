@@ -18,7 +18,7 @@ export async function POST(request) {
     const extraPlace = freetext ? `・${freetext}` : '';
 
     // STEP1: 軽量モデルでGoogle検索+JSON直接生成を試みる
-    const step1Url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const step1Url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
     const step2Url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     const jsonTemplate = `{"timestamp":"${nowStr}","sourceNote":"3ソース検証済","spots":[{"name":"スポット名","location":"場所","migoron_score":88,"flower_score":95,"saturday":{"label":"4/26(土)","weather":"晴","temp":"20/5"},"sunday":{"label":"4/27(日)","weather":"曇","temp":"18/6"},"info":"見どころ","warning":"","tags":["家族","撮影"]}]}`;
