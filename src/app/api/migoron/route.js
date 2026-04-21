@@ -45,8 +45,17 @@ Return ONLY JSON.`;
       const data = await res.json();
       const rawText = (data?.candidates?.[0]?.content?.parts || [])
         .filter(p => typeof p.text === 'string').map(p => p.text).join('').trim();
-      const result = extractJSON(rawText);
-      if (!result) return Response.json({ error: 'PARSE_FAIL:' + rawText.slice(0, 300) }, { status: 500 });
+      let result;
+      try {
+        result = JSON.parse(rawText);
+      } catch(e) {
+        // コードフェンス除去して再試行
+        const cleaned = rawText.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+        try { result = JSON.parse(cleaned); } catch(e2) {
+          return Response.json({ error: 'PARSE_FAIL:' + rawText.slice(0, 300) }, { status: 500 });
+        }
+      }
+      if (!result || !Array.isArray(result.spots)) return Response.json({ error: '不正なJSON形式です' }, { status: 500 });
       return Response.json(result);
 
     } else {
@@ -92,8 +101,17 @@ ${searchResult}
       const step2Data = await step2Res.json();
       const rawText = (step2Data?.candidates?.[0]?.content?.parts || [])
         .filter(p => typeof p.text === 'string').map(p => p.text).join('').trim();
-      const result = extractJSON(rawText);
-      if (!result) return Response.json({ error: 'PARSE_FAIL:' + rawText.slice(0, 300) }, { status: 500 });
+      let result;
+      try {
+        result = JSON.parse(rawText);
+      } catch(e) {
+        // コードフェンス除去して再試行
+        const cleaned = rawText.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+        try { result = JSON.parse(cleaned); } catch(e2) {
+          return Response.json({ error: 'PARSE_FAIL:' + rawText.slice(0, 300) }, { status: 500 });
+        }
+      }
+      if (!result || !Array.isArray(result.spots)) return Response.json({ error: '不正なJSON形式です' }, { status: 500 });
       return Response.json(result);
     }
 
