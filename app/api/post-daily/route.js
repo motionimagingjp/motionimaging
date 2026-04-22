@@ -10,34 +10,34 @@ export async function GET(request) {
   }
 
   try {
-    // 1. Geminiのセットアップ (モデル名を安定版に変更)
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+    
+    // モデル名を最も汎用的な "gemini-1.5-flash" に戻し、
+    // 書き方をシンプルに修正（モデルの取得に失敗した際のエラーを捕捉しやすくします）
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // 2. ジェイクの人格設定（プロンプト）
     const prompt = `
-      君は「マルチイメージクリエーター・ジェイク」として、日本語で独り言をポストしてください。
+      君は「マルチイメージクリエーター・ジェイク」だ。
+      以下の設定で、日本語の独り言を1つ生成せよ。
       
-      【ジェイクの肖像】
-      ・50代。プレミア企業での駐在経験がある国際派。
-      ・一級船舶免許を持ち、宮古島や石垣などの離島の海を愛する。元スノボインストラクターとして雪山も知る。
-      ・愛車はGB350S。平日はジャズや80-90s R&Bを聴きながら静かに現像作業（INFJ）。
-      ・【撮影スタイル】後から感性で仕上げるため、常にRAWで撮影しています。フィルターでの固定は避け、素材の良さを活かした現像を好みます。
-
-      【ポストの条件】
-      ・「季節の移ろい（花など）」「旅の記憶」「機材と技術」「音と暮らし」から1つ選ぶ。
-      ・140文字以内。ハッシュタグは #motionimaging のみ。
-      ・口調：落ち着いた大人の、丁寧で少し親しみやすい日本語。
-      ・こだわり：「〜しました」より「〜しています」という現在進行形の表現を好みます。
-      ・宮古や石垣の離島の海のエピソード、昔は難しかった階調表現の話、RAWでの撮影意図などを、さらっとスパイス的に織り交ぜてください。
+      【設定】
+      ・50代。プレミア企業駐在経験者。
+      ・一級船舶免許保持。宮古島や石垣の海を愛する。元スノボインストラクター。
+      ・愛車はGB350S。平日は80-90s R&Bを聴きながら現像作業に没頭する。
+      ・撮影は常にRAW。フィルターでの固定は避け、素材の良さを活かした現像を好む。
+      ・「〜しました」より「〜しています」という表現を好む。
+      ・140文字以内。ハッシュタグ #motionimaging を含める。
+      ・口調：落ち着いた大人の、丁寧で親しみやすい日本語。
     `;
 
-    // 3. テキスト生成
+    // 実行部分を安全な形に修正
     const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const tweetText = response.text();
+    const tweetText = result.response.text();
 
-    // 4. X（Twitter）への投稿
+    if (!tweetText) {
+      throw new Error("Gemini generated an empty response.");
+    }
+
     const client = new TwitterApi({
       appKey: process.env.X_API_KEY,
       appSecret: process.env.X_API_SECRET,
@@ -56,10 +56,10 @@ export async function GET(request) {
     });
 
   } catch (error) {
-    console.error(error);
+    // エラーメッセージを詳細に返すように修正
     return new Response(JSON.stringify({ 
       error: error.message,
-      stack: error.stack 
+      detail: "Check if GEMINI_API_KEY is valid and has access to the specified model."
     }), { 
       status: 500,
       headers: { 'Content-Type': 'application/json' },
