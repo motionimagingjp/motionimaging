@@ -12,27 +12,16 @@ export async function GET(request) {
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     
-    // フルパス指定「models/gemini-1.5-flash」に変更することで、V1 APIの認識エラーを回避します
-    const model = genAI.getGenerativeModel({ model: "models/gemini-1.5-flash" });
+    // ここを最も基本的な指定方法に変更します
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
-      君は「マルチイメージクリエーター・ジェイク」だ。
-      以下の設定で、日本語の独り言を1つ生成せよ。
-      
-      【ジェイクの設定】
-      ・50代。プレミア企業駐在経験がある国際派。
-      ・一級船舶免許保持。宮古島や石垣の海を愛する。元スノボインストラクター。
-      ・愛車はGB350S。平日は80-90s R&Bを聴きながら現像作業に没頭する。
-      ・撮影は常にRAW。フィルターでの固定は避け、素材の良さを活かした現像を好む。
-      ・140文字以内。ハッシュタグ #motionimaging を含める。
-      ・口調：落ち着いた大人の、丁寧で親しみやすい日本語。
-      ・内容：今の時期（4月）に咲く花と、離島の記憶やRAW現像の楽しさをさらっと。
+      マルチイメージクリエーター・ジェイクとして、大人の独り言を1つ生成してください。
+      条件：50代、国際派、宮古・石垣の海、RAW撮影へのこだわり、丁寧な日本語、140文字以内、#motionimaging を含む。
     `;
 
     const result = await model.generateContent(prompt);
     const tweetText = result.response.text();
-
-    if (!tweetText) throw new Error("Generated text is empty");
 
     const client = new TwitterApi({
       appKey: process.env.X_API_KEY,
@@ -49,9 +38,10 @@ export async function GET(request) {
     }), { status: 200 });
 
   } catch (error) {
+    // エラーが出た場合、Jakeさんに「どのURLで404が出たか」を正確に報告させます
     return new Response(JSON.stringify({ 
-      error_detected: error.message,
-      fix_hint: "If still 404, the API Key might be limited to specific projects in Google Cloud."
+      error_message: error.message,
+      help: "Google AI Studioで新しいAPIキーを作成し、'Pay-as-you-go'プラン（無料枠あり）が有効か確認してください。"
     }), { status: 500 });
   }
 }
