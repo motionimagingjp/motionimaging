@@ -14,7 +14,8 @@ export async function GET(request) {
     const API_KEY = "AIzaSyD6ZdH0z8Sm-yYYrraSlNpWPCVzbddvRZg";
     
     // Google Gemini APIを叩く（最新の v1beta 窓口を直接指定）
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
+    // ✅ models/ を二回重ねず、かつモデル名に -latest を付けないのが「v1beta」の正解です
+const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
     
     const geminiResponse = await fetch(geminiUrl, {
       method: 'POST',
