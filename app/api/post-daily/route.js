@@ -9,17 +9,17 @@ export async function GET(request) {
   }
 
   try {
-    // 【重要】ここをご自身のAPIキー（AIza...）に書き換えてください
+    // 【重要】ご自身のAPIキー（AIza...）をここに貼り付け
     const API_KEY = "AIzaSyD6ZdH0z8Sm-yYYrraSlNpWPCVzbddvRZg";
     
-    // ライブラリを使わず、直接「v1beta」の窓口を叩きます
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+    // モデル名を、最も確実に存在する「gemini-pro」に変更します
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
     
     const geminiResponse = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: "マルチイメージクリエーター・ジェイクとして、大人の独り言を100文字以内で生成してください。RAW撮影へのこだわりを含め、末尾に #motionimaging を付けてください。" }] }]
+        contents: [{ parts: [{ text: "マルチイメージクリエーター・ジェイクとして、大人の独り言を100文字以内で生成してください。末尾に #motionimaging を付けてください。" }] }]
       })
     });
 
@@ -29,6 +29,7 @@ export async function GET(request) {
       throw new Error(`Gemini Error: ${data.error.message}`);
     }
 
+    // AIからの回答を取り出す
     const tweetText = data.candidates[0].content.parts[0].text;
 
     const client = new TwitterApi({
@@ -40,7 +41,10 @@ export async function GET(request) {
 
     await client.v2.tweet(tweetText.trim());
 
-    return new Response(JSON.stringify({ message: 'Success', tweet: tweetText.trim() }), { status: 200 });
+    return new Response(JSON.stringify({ 
+      message: 'Success', 
+      tweet: tweetText.trim() 
+    }), { status: 200 });
 
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
