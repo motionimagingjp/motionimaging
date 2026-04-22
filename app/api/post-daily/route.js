@@ -10,16 +10,27 @@ export async function GET(request) {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    // APIキーの読み込み（前後の空白を削除する処理を追加して安全性を高めました）
+    const apiKey = process.env.GEMINI_API_KEY?.trim();
+    const genAI = new GoogleGenerativeAI(apiKey);
     
-    // 最も確実なモデル名「gemini-1.0-pro」を直接指定します
-    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+    // Tier 1なら、最も高性能な 1.5-flash が確実に使えるはずです
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const prompt = "マルチイメージクリエーター・ジェイクとして、4月の花とRAW撮影の楽しさについて100文字程度で大人っぽく独り言を言って。 #motionimaging";
+    const prompt = `
+      マルチイメージクリエーター・ジェイクとして、大人の独り言を1つ生成してください。
+      【条件】50代、国際派、宮古・石垣の海、RAW撮影へのこだわり、丁寧な日本語、140文字以内、#motionimaging を含む。
+      【こだわり】「〜しました」より「〜しています」という表現を使って。
+    `;
 
+    // 最新の呼び出し形式
     const result = await model.generateContent(prompt);
-    const tweetText = result.response.text();
+    const response = await result.response;
+    const tweetText = response.text();
 
+    if (!tweetText) throw new Error("Generated text is empty");
+
+    // X API への投稿
     const client = new TwitterApi({
       appKey: process.env.X_API_KEY,
       appSecret: process.env.X_API_SECRET,
@@ -35,9 +46,10 @@ export async function GET(request) {
     }), { status: 200 });
 
   } catch (error) {
+    console.error("DEBUG ERROR:", error);
     return new Response(JSON.stringify({ 
-      error_detected: error.message,
-      check: "これで404なら、APIキーを 'gemini-1.0-pro' が使えるものに作り直す必要があります"
+      error_message: error.message,
+      fix_tip: "VercelのGEMINI_API_KEYの値を、AI Studioの最新キーで再度『上書き保存』してからRedeployしてください。"
     }), { status: 500 });
   }
 }
