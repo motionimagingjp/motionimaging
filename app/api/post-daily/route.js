@@ -13,7 +13,8 @@ export async function GET(request) {
     const API_KEY = "AIzaSyD6ZdH0z8Sm-yYYrraSlNpWPCVzbddvRZg";
     
     // モデル名を、最も確実に存在する「gemini-pro」に変更します
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
+    // URLの中の「models/」を削り、モデル名を直接指定します
+const url = `https://generativelanguage.googleapis.com/v1beta/gemini-pro:generateContent?key=${API_KEY}`;
     
     const geminiResponse = await fetch(url, {
       method: 'POST',
