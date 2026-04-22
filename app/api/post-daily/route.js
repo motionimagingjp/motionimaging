@@ -15,7 +15,7 @@ export async function GET(request) {
     const genAI = new GoogleGenerativeAI(apiKey);
     
     // Tier 1なら、最も高性能な 1.5-flash が確実に使えるはずです
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
     const prompt = `
       マルチイメージクリエーター・ジェイクとして、大人の独り言を1つ生成してください。
