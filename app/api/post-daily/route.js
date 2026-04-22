@@ -12,13 +12,10 @@ export async function GET(request) {
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     
-    // ここを最も基本的な指定方法に変更します
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // 最も確実なモデル名「gemini-1.0-pro」を直接指定します
+    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
 
-    const prompt = `
-      マルチイメージクリエーター・ジェイクとして、大人の独り言を1つ生成してください。
-      条件：50代、国際派、宮古・石垣の海、RAW撮影へのこだわり、丁寧な日本語、140文字以内、#motionimaging を含む。
-    `;
+    const prompt = "マルチイメージクリエーター・ジェイクとして、4月の花とRAW撮影の楽しさについて100文字程度で大人っぽく独り言を言って。 #motionimaging";
 
     const result = await model.generateContent(prompt);
     const tweetText = result.response.text();
@@ -38,10 +35,9 @@ export async function GET(request) {
     }), { status: 200 });
 
   } catch (error) {
-    // エラーが出た場合、Jakeさんに「どのURLで404が出たか」を正確に報告させます
     return new Response(JSON.stringify({ 
-      error_message: error.message,
-      help: "Google AI Studioで新しいAPIキーを作成し、'Pay-as-you-go'プラン（無料枠あり）が有効か確認してください。"
+      error_detected: error.message,
+      check: "これで404なら、APIキーを 'gemini-1.0-pro' が使えるものに作り直す必要があります"
     }), { status: 500 });
   }
 }
