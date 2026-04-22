@@ -12,7 +12,7 @@ export async function GET(request) {
   try {
     // 【重要】ここに、先ほど AI Studio で新しく作ったキー（AIza...）を「直接」貼り付けてください
     // テストが終わったら消すので、一度だけこの「直書き」で強行突破します。
-    const apiKey = "ここにあなたのAPIキーを貼り付け"; 
+    const apiKey = "AIzaSyD6ZdH0z8Sm-yYYrraSlNpWPCVzbddvRZg"; 
     
     const genAI = new GoogleGenerativeAI(apiKey);
     
