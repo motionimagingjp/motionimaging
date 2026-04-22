@@ -15,7 +15,8 @@ export async function GET(request) {
     // モデル名を、最も確実に存在する「gemini-pro」に変更します
     // URLの中の「models/」を削り、モデル名を直接指定します
 // ✅ これがGoogle APIの「正解」の住所です
-const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+// ✅ モデル名の後ろに「-latest」を付けるのが、今のGoogle APIの「正解」です
+const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
     
     const geminiResponse = await fetch(url, {
       method: 'POST',
