@@ -15,7 +15,8 @@ export async function GET(request) {
     const genAI = new GoogleGenerativeAI(apiKey);
     
     // Tier 1なら、最も高性能な 1.5-flash が確実に使えるはずです
-   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+// 「-latest」を抜き、ハイフンをピリオドに変えた「1.5-flash」が世界標準の指定法です
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       マルチイメージクリエーター・ジェイクとして、大人の独り言を1つ生成してください。
