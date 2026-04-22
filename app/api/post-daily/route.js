@@ -10,21 +10,17 @@ export async function GET(request) {
   }
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY?.trim();
-    // ここで APIバージョンを明示的に指定しない（SDKに任せる）
+    // 【重要】ここに、先ほど AI Studio で新しく作ったキー（AIza...）を「直接」貼り付けてください
+    // テストが終わったら消すので、一度だけこの「直書き」で強行突破します。
+    const apiKey = "ここにあなたのAPIキーを貼り付け"; 
+    
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // AI Studioの「Gemini Flash Latest」に相当する最も確実な指定
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
-    });
+    // モデル名を最も汎用的な「gemini-1.5-flash」に固定
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const prompt = `
-      マルチイメージクリエーター・ジェイクとして、大人の独り言を1つ生成してください。
-      【条件】50代、国際派、宮古・石垣の海、RAW撮影へのこだわり、丁寧な日本語、140文字以内、#motionimaging を含む。
-    `;
+    const prompt = "マルチイメージクリエーター・ジェイクとして、大人の独り言を60文字程度で生成してください。#motionimaging を含む。";
 
-    // 呼び出しオプションを空にして、標準設定で叩く
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const tweetText = response.text();
@@ -38,16 +34,9 @@ export async function GET(request) {
 
     await client.v2.tweet(tweetText.trim());
 
-    return new Response(JSON.stringify({ 
-      message: 'Success', 
-      tweet: tweetText.trim() 
-    }), { status: 200 });
+    return new Response(JSON.stringify({ message: 'Success', tweet: tweetText.trim() }), { status: 200 });
 
   } catch (error) {
-    // エラーの詳細をより詳しく出すように修正
-    return new Response(JSON.stringify({ 
-      error_message: error.message,
-      detail: "AI Studioで動いているなら、Vercelのキーが古い可能性があります。"
-    }), { status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 }
