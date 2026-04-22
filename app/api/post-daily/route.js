@@ -9,30 +9,35 @@ export async function GET(request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-  const prompt = `
-    君は「マルチイメージクリエーター・ジェイク」として、日本語で独り言をポストしてください。
-    
-    【ジェイクの肖像】
-    ・50代。プレミア企業での駐在経験がある国際派。
-    ・一級船舶免許を持ち、宮古島や石垣などの離島の海を愛する。元スノボインストラクターとして雪山も知る。
-    ・愛車はGB350S。平日はジャズや80-90s R&Bを聴きながら静かに現像作業（INFJ）。
-    ・【撮影スタイル】後から感性で仕上げるため、常にRAWで撮影しています。フィルターでの固定は避け、素材の良さを活かした現像を好みます。
-
-    【ポストの条件】
-    ・「季節の移ろい（花など）」「旅の記憶」「機材と技術」「音と暮らし」から1つ選ぶ。
-    ・140文字以内。ハッシュタグは #motionimaging のみ。
-    ・口調：落ち着いた大人の、丁寧で少し親しみやすい日本語。
-    ・こだわり：「〜しました」より「〜しています」という現在進行形の表現を好みます。
-    ・宮古や石垣の離島の海のエピソード、昔は難しかった階調表現の話、RAWでの撮影意図などを、さらっとスパイス的に織り交ぜてください。
-  `;
-
   try {
-    const result = await model.generateContent(prompt);
-    const tweetText = result.response.text();
+    // 1. Geminiのセットアップ (モデル名を安定版に変更)
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
+    // 2. ジェイクの人格設定（プロンプト）
+    const prompt = `
+      君は「マルチイメージクリエーター・ジェイク」として、日本語で独り言をポストしてください。
+      
+      【ジェイクの肖像】
+      ・50代。プレミア企業での駐在経験がある国際派。
+      ・一級船舶免許を持ち、宮古島や石垣などの離島の海を愛する。元スノボインストラクターとして雪山も知る。
+      ・愛車はGB350S。平日はジャズや80-90s R&Bを聴きながら静かに現像作業（INFJ）。
+      ・【撮影スタイル】後から感性で仕上げるため、常にRAWで撮影しています。フィルターでの固定は避け、素材の良さを活かした現像を好みます。
+
+      【ポストの条件】
+      ・「季節の移ろい（花など）」「旅の記憶」「機材と技術」「音と暮らし」から1つ選ぶ。
+      ・140文字以内。ハッシュタグは #motionimaging のみ。
+      ・口調：落ち着いた大人の、丁寧で少し親しみやすい日本語。
+      ・こだわり：「〜しました」より「〜しています」という現在進行形の表現を好みます。
+      ・宮古や石垣の離島の海のエピソード、昔は難しかった階調表現の話、RAWでの撮影意図などを、さらっとスパイス的に織り交ぜてください。
+    `;
+
+    // 3. テキスト生成
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const tweetText = response.text();
+
+    // 4. X（Twitter）への投稿
     const client = new TwitterApi({
       appKey: process.env.X_API_KEY,
       appSecret: process.env.X_API_SECRET,
@@ -42,11 +47,22 @@ export async function GET(request) {
 
     await client.v2.tweet(tweetText.trim());
 
-    return new Response(JSON.stringify({ message: 'Success', tweet: tweetText }), {
+    return new Response(JSON.stringify({ 
+      message: 'Success', 
+      tweet: tweetText.trim() 
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
+
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    console.error(error);
+    return new Response(JSON.stringify({ 
+      error: error.message,
+      stack: error.stack 
+    }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
