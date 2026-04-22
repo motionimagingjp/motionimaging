@@ -3,26 +3,28 @@ import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
+  // Vercel Cronからの認証チェック
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return new Response('Unauthorized', { status: 401 });
   }
 
   try {
-    // 【重要】ご自身のAPIキー（AIza...）をここに貼り付け
-    const API_KEY = "AIzaSyD6ZdH0z8Sm-yYYrraSlNpWPCVzbddvRZg";
+    // 【最重要】ここをご自身のAPIキー（AIza...）に書き換えてください
+    const API_KEY = "ここにAIzaから始まるAPIキーを貼り付け";
     
-    // モデル名を、最も確実に存在する「gemini-pro」に変更します
-    // URLの中の「models/」を削り、モデル名を直接指定します
-// ✅ これがGoogle APIの「正解」の住所です
-// ✅ モデル名の後ろに「-latest」を付けるのが、今のGoogle APIの「正解」です
-const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${API_KEY}`;
+    // Google Gemini APIを叩く（最新の v1beta 窓口を直接指定）
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
     
-    const geminiResponse = await fetch(url, {
+    const geminiResponse = await fetch(geminiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: "マルチイメージクリエーター・ジェイクとして、大人の独り言を100文字以内で生成してください。末尾に #motionimaging を付けてください。" }] }]
+        contents: [{ 
+          parts: [{ 
+            text: "マルチイメージクリエーター・ジェイクとして、50代の大人の余裕を感じさせる独り言を80文字以内で生成してください。末尾に必ず #motionimaging を含めてください。" 
+          }] 
+        }]
       })
     });
 
@@ -32,24 +34,30 @@ const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-
       throw new Error(`Gemini Error: ${data.error.message}`);
     }
 
-    // AIからの回答を取り出す
-    const tweetText = data.candidates[0].content.parts[0].text;
+    // 生成されたテキストを取得
+    const tweetText = data.candidates[0].content.parts[0].text.trim();
 
-    const client = new TwitterApi({
+    // X (Twitter) APIの設定（環境変数から読み込み）
+    const xClient = new TwitterApi({
       appKey: process.env.X_API_KEY,
       appSecret: process.env.X_API_SECRET,
       accessToken: process.env.X_ACCESS_TOKEN,
       accessSecret: process.env.X_ACCESS_SECRET,
     });
 
-    await client.v2.tweet(tweetText.trim());
+    // 【是正ポイント】プロフィール更新ではなく、確実に「ツイート」として投稿
+    await xClient.v2.tweet(tweetText);
 
     return new Response(JSON.stringify({ 
       message: 'Success', 
-      tweet: tweetText.trim() 
+      tweet: tweetText 
     }), { status: 200 });
 
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    console.error(error);
+    return new Response(JSON.stringify({ 
+      error: error.message,
+      detail: "エラーが発生しました。APIキーやモデル設定を確認してください。"
+    }), { status: 500 });
   }
 }
