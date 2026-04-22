@@ -11,7 +11,7 @@ export async function GET(request) {
 
   try {
     // 【最重要】ここをご自身のAPIキー（AIza...）に書き換えてください
-    const API_KEY = "ここにAIzaから始まるAPIキーを貼り付け";
+    const API_KEY = "AIzaSyD6ZdH0z8Sm-yYYrraSlNpWPCVzbddvRZg";
     
     // Google Gemini APIを叩く（最新の v1beta 窓口を直接指定）
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
