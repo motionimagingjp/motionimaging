@@ -22,7 +22,7 @@ async function generateTweet(apiKey, prompt) {
   const data = await res.json();
   if (data.error) throw new Error(`Gemini Error: ${data.error.message}`);
   const text = data.candidates[0].content.parts[0].text.trim();
-  return text.slice(0, 140);
+  return text;
 }
 
 export async function GET(request) {
