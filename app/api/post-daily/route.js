@@ -11,7 +11,7 @@ export async function GET(request) {
 
   try {
     // 【最重要】ここをご自身のAPIキー（AIza...）に書き換えてください
-    const API_KEY = "AIzaSyD6ZdH0z8Sm-yYYrraSlNpWPCVzbddvRZg";
+    const API_KEY = process.env.GEMINI_API_KEY;
     
     // Google Gemini APIを叩く（最新の v1beta 窓口を直接指定）
     // ✅ models/ を二回重ねず、かつモデル名に -latest を付けないのが「v1beta」の正解です
