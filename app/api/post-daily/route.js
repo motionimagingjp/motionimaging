@@ -50,21 +50,8 @@ export async function GET(request) {
 🌷吉野山（奈良）散り始め
 #花撮影 #風景写真`,
 
-      cloud_sea: `【重要】必ず100文字以内で完結した投稿文を1つだけ出力してください。説明・前置き・改行は不要です。
-
-以下のフォーマットで作成してください：
-【${dateLabel}の雲海予報】
-（おすすめスポット3件を成功率付きで簡潔に）
-（ゴールデンタイム）
-（ハッシュタグ2〜3個）
-
-例：
-【4月24日の雲海予報】
-☁️高ボッチ高原 成功率80%
-☁️美ヶ原 成功率65%
-☁️車山高原 成功率60%
-⏰4:30〜6:00がベスト
-#雲海 #風景写真
+      cloud_sea: `【${dateLabel}の雲海予報】を以下の形式で出力せよ。改行なし1行で。
+☁️スポット名1 成功率XX% ☁️スポット名2 成功率XX% ☁️スポット名3 成功率XX% ⏰XX:XX〜XX:XXがベスト #雲海 #風景写真
 
 【秩父が含まれる場合の補正ルール】
 - 迷った時は確率を5〜10%低めに保守的に丸める
@@ -73,62 +60,5 @@ export async function GET(request) {
 - 露点温度と最低気温の差が2℃以内なら「濃い雲海」または「夜景が透ける薄い雲海」を明記
 - 4〜5月の雨上がり翌朝のみ例外的に+10%上方修正可`,
 
-      fujisan: `【重要】必ず100文字以内で完結した投稿文を1つだけ出力してください。説明・前置き・改行は不要です。
-
-以下のフォーマットで作成してください：
-【${dateLabel}の富士山予報】
-（おすすめスポット3件を星評価付きで簡潔に）
-（最良撮影時間帯）
-（ハッシュタグ2〜3個）
-
-例：
-【4月24日の富士山予報】
-🗻河口湖畔 ⭐⭐⭐⭐⭐
-🗻山中湖 ⭐⭐⭐⭐
-🗻本栖湖 ⭐⭐⭐
-⏰5:00〜7:30がベスト
-#富士山 #風景写真`,
-    };
-
-    // Geminiで3つ生成（直列）
-    const flowerTweet   = await generateTweet(API_KEY, prompts.flower);
-    const cloudSeaTweet = await generateTweet(API_KEY, prompts.cloud_sea);
-    const fujisanTweet  = await generateTweet(API_KEY, prompts.fujisan);
-
-    // X投稿（2秒間隔）
-    const xClient = new TwitterApi({
-      appKey:      process.env.X_API_KEY,
-      appSecret:   process.env.X_API_SECRET,
-      accessToken: process.env.X_ACCESS_TOKEN,
-      accessSecret:process.env.X_ACCESS_SECRET,
-    });
-
-    const results = {};
-    for (const [key, text] of [
-      ['flower',    flowerTweet],
-      ['cloud_sea', cloudSeaTweet],
-      ['fujisan',   fujisanTweet],
-    ]) {
-      try {
-        await xClient.v2.tweet(text);
-        results[key] = { ok: true, tweet: text };
-      } catch (err) {
-        results[key] = { ok: false, error: err.message };
-      }
-      await new Promise(r => setTimeout(r, 2000));
-    }
-
-    return new Response(JSON.stringify({
-      message: 'Success',
-      date: dateLabel,
-      results
-    }), { status: 200 });
-
-  } catch (error) {
-    console.error(error);
-    return new Response(JSON.stringify({
-      error: error.message,
-      detail: "エラーが発生しました。APIキーやモデル設定を確認してください。"
-    }), { status: 500 });
-  }
-}
+     fujisan: `【${dateLabel}の富士山予報】を以下の形式で出力せよ。改行なし1行で。
+🗻スポット名1 ⭐⭐⭐⭐⭐ 🗻スポット名2 ⭐⭐⭐⭐ 🗻スポット名3 ⭐⭐⭐ ⏰XX:XX〜XX:XXがベスト #富士山 #風景写真`,
