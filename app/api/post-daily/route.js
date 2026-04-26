@@ -35,11 +35,12 @@ export async function GET(request) {
     const API_KEY = process.env.GEMINI_API_KEY;
     const dateLabel = getTomorrowLabel();
 
-    const flowerPrompt = '【' + dateLabel + 'の花スポット】 🌸おすすめ3選を出力せよ。AIの知識で実在スポットを選べ。形式：絵文字+スポット名(都道府県)+状況 を3件、最後にハッシュタグ2個。1行で出力せよ。';
+    const flowerPrompt = '【重要】必ず100文字以内で完結した投稿文を1つだけ出力してください。説明・前置き・改行は不要です。\n【' + dateLabel + 'の花畑】\n例：【4月24日の花畑】 🌸高遠城址公園（長野）満開 🌼ひたち海浜公園（茨城）見頃 🌷吉野山（奈良）散り始め #花撮影 #風景写真';
 
-const cloudSeaPrompt = '【' + dateLabel + 'の雲海予報】 AIの気象知識で関東・中部の雲海スポット3選を出力せよ。形式：☁️スポット名 成功率XX% を3件、⏰ベスト時間、ハッシュタグ2個。1行で出力せよ。断り文句は不要。秩父補正：湿度・風速・露点を考慮し保守的に。';
+    const cloudSeaPrompt = '【' + dateLabel + 'の雲海予報】を以下の形式で出力せよ。改行なし1行で。\n☁️スポット名1 成功率XX% ☁️スポット名2 成功率XX% ☁️スポット名3 成功率XX% ⏰XX:XX〜XX:XXがベスト #雲海 #風景写真\n【秩父が含まれる場合の補正ルール】\n- 迷った時は確率を5〜10%低めに保守的に丸める\n- 前夜21時の湿度が85%未満なら強制的に30%以下に下方修正\n- 風速2m/s以上が1時間でもある場合は判定を1ランク下げる\n- 露点温度と最低気温の差が2度以内なら「濃い雲海」または「夜景が透ける薄い雲海」を明記\n- 4〜5月の雨上がり翌朝のみ例外的に+10%上方修正可';
 
-const fujisanPrompt = '【' + dateLabel + 'の富士山予報】 AIの気象知識で富士山ビュースポット3選を出力せよ。形式：🗻スポット名(評価X/5) を3件、⏰ベスト時間、ハッシュタグ2個。1行で出力せよ。断り文句は不要。';
+    const fujisanPrompt = '【' + dateLabel + 'の富士山予報】を以下の形式で出力せよ。改行なし1行で。\n🗻スポット名1(評価:5/5) 🗻スポット名2(評価:4/5) 🗻スポット名3(評価:3/5) ⏰XX:XX〜XX:XXがベスト #富士山 #風景写真';
+
     // Geminiで3つ生成（直列）
     const flowerTweet   = await generateTweet(API_KEY, flowerPrompt);
     const cloudSeaTweet = await generateTweet(API_KEY, cloudSeaPrompt);
