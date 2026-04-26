@@ -35,16 +35,55 @@ export async function GET(request) {
     const API_KEY = process.env.GEMINI_API_KEY;
     const dateLabel = getTomorrowLabel();
 
-    const flowerPrompt = '【重要】必ず100文字以内で完結した投稿文を1つだけ出力してください。説明・前置き・改行は不要です。\n【' + dateLabel + 'の花畑】\n例：【4月24日の花畑】 🌸高遠城址公園（長野）満開 🌼ひたち海浜公園（茨城）見頃 🌷吉野山（奈良）散り始め #花撮影 #風景写真';
+    const prompts = {
+      flower: `あなたはプロ風景写真家・ジェイクのSNS担当です。X（Twitter）投稿文を1つだけ日本語で作成してください。
 
-    const cloudSeaPrompt = '【' + dateLabel + 'の雲海予報】を以下の形式で出力せよ。改行なし1行で。\n☁️スポット名1 成功率XX% ☁️スポット名2 成功率XX% ☁️スポット名3 成功率XX% ⏰XX:XX〜XX:XXがベスト #雲海 #風景写真\n【秩父が含まれる場合の補正ルール】\n- 迷った時は確率を5〜10%低めに保守的に丸める\n- 前夜21時の湿度が85%未満なら強制的に30%以下に下方修正\n- 風速2m/s以上が1時間でもある場合は判定を1ランク下げる\n- 露点温度と最低気温の差が2度以内なら「濃い雲海」または「夜景が透ける薄い雲海」を明記\n- 4〜5月の雨上がり翌朝のみ例外的に+10%上方修正可';
+条件：
+- 「${dateLabel}に行くべき花スポット」の文脈
+- おすすめスポットを3件リストアップ（実在する日本の名所）
+- 各スポットに絵文字と一言コメント
+- プロカメラマン視点のフォトインサイト（機材・構図）を1つ
+- ハッシュタグ3個を最後に
+- 必ず日本語で出力すること
+- 投稿文のみ出力（説明・前置き不要）`,
 
-    const fujisanPrompt = '【' + dateLabel + 'の富士山予報】を以下の形式で出力せよ。改行なし1行で。\n🗻スポット名1(評価:5/5) 🗻スポット名2(評価:4/5) 🗻スポット名3(評価:3/5) ⏰XX:XX〜XX:XXがベスト #富士山 #風景写真';
+      cloud_sea: `あなたはプロ風景写真家・ジェイクのSNS担当です。X（Twitter）投稿文を1つだけ日本語で作成してください。
+
+条件：
+- 「${dateLabel}の雲海撮影予報」の文脈
+- おすすめスポットを3件（実在する日本の山・高原）
+- 撮影成功確率をスコアで表示（例：成功率80%）
+- ゴールデンタイム（早朝4〜6時）を明記
+- ハッシュタグ3個を最後に
+- 必ず日本語で出力すること
+- 投稿文のみ出力（説明・前置き不要）
+
+秩父が含まれる場合の補正ルール：
+- 迷った時は確率を5〜10%低めに保守的に丸める
+- 前夜21時の湿度が85%未満なら強制的に30%以下に下方修正
+- 風速2m/s以上が1時間でもある場合は判定を1ランク下げる
+- 露点温度と最低気温の差が2度以内なら「濃い雲海」または「夜景が透ける薄い雲海」を明記
+- 4〜5月の雨上がり翌朝のみ例外的に+10%上方修正可`,
+
+      fujisan: `あなたはプロ風景写真家・ジェイクのSNS担当です。X（Twitter）投稿文を1つだけ日本語で作成してください。
+
+条件：
+- 「${dateLabel}の富士山ミゴロン指数」の文脈
+- その日の撮影条件から指数の高いスポットを3件選ぶ（富士山周辺の実在する場所）
+- 各スポットにミゴロン指数（XX%）を付ける
+- 最良撮影時間帯を明記
+- ハッシュタグ3個を最後に
+- 必ず日本語で出力すること
+- 投稿文のみ出力（説明・前置き不要）
+
+出力例：
+富士山ミゴロン指数【4月27日】 🗻河口湖畔(90%) 🗻田貫湖(85%) 🗻山中湖パノラマ台(75%) ⏰5:00〜7:00がベスト #富士山 #風景写真 #ミゴロン`,
+    };
 
     // Geminiで3つ生成（直列）
-    const flowerTweet   = await generateTweet(API_KEY, flowerPrompt);
-    const cloudSeaTweet = await generateTweet(API_KEY, cloudSeaPrompt);
-    const fujisanTweet  = await generateTweet(API_KEY, fujisanPrompt);
+    const flowerTweet   = await generateTweet(API_KEY, prompts.flower);
+    const cloudSeaTweet = await generateTweet(API_KEY, prompts.cloud_sea);
+    const fujisanTweet  = await generateTweet(API_KEY, prompts.fujisan);
 
     // X投稿（2秒間隔）
     const xClient = new TwitterApi({
