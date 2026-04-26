@@ -16,7 +16,7 @@ async function generateTweet(apiKey, prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 200 }
+      generationConfig: { temperature: 0.8, maxOutputTokens: 500 }
     })
   });
   const data = await res.json();
