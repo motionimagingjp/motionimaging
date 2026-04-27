@@ -109,10 +109,10 @@ export async function GET(request) {
 
     const results = {};
     for (const [key, text] of [
-      ['flower',    flowerTweet],
-      ['cloud_sea', cloudSeaTweet],
-      ['fujisan',   fujisanTweet],
-    ]) {
+  ['cloud_sea', cloudSeaTweet],
+  ['fujisan',   fujisanTweet],
+  ['flower',    flowerTweet],
+]) {
       try {
         await xClient.v2.tweet(text);
         results[key] = { ok: true, tweet: text };
