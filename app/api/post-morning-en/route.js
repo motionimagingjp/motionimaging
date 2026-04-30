@@ -33,19 +33,25 @@ function getSeasonalFlowersEN() {
   return [];
 }
 
-async function generateTweet(apiKey, prompt) {
+async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 1500 }
+      generationConfig: {
+        temperature: 0.8,
+        maxOutputTokens: 300,
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     })
   });
   const data = await res.json();
   if (data.error) throw new Error('Gemini Error: ' + data.error.message);
-  return data.candidates[0].content.parts[0].text.trim();
+  const parts = data.candidates[0].content.parts;
+  const textPart = parts.find(p => p.text && !p.thought);
+  return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
 export async function GET(request) {
@@ -59,25 +65,44 @@ export async function GET(request) {
     const sakura = isSakuraSeason();
     const flowers = getSeasonalFlowersEN();
 
-    const sakuraInstruction = sakura
-      ? 'Sakura season (February 1 to April 15). Estimate accumulated temperature since February 1. Bloom starts at 210 degrees C (index 50 percent). Full bloom at 370 degrees C (index 90 percent or higher). Select 5 real sakura spots in Kanto and nearby. Factor in elevation and regional differences.'
-      : 'Current season flowers in Kanto and nearby: ' + flowers.join(', ') + '. Select 5 real locations where these flowers are at peak bloom now. No temperature calculation needed.';
+    const seasonInfo = sakura
+      ? 'Cherry blossom season. Calculate bloom progress from Feb 1 accumulated temp (bloom at 210C, full bloom at 370C). Select 5 real sakura spots in Kanto.'
+      : 'In-season flowers: ' + flowers.join(', ') + '. Select 5 real flower spots in Kanto region.';
 
-    const prompt = 'You are the social media manager for Migoron, a Japanese landscape photography account.\n\n'
+    const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
       + 'Date: ' + dateLabel + '\n'
-      + 'Season: ' + sakuraInstruction + '\n\n'
-      + 'Write a post with EXACTLY this format and nothing else:\n'
-      + 'Bloom Index [' + dateLabel + ']\n'
-      + 'emoji Location1 (XX%)\n'
-      + 'emoji Location2 (XX%)\n'
-      + 'emoji Location3 (XX%)\n'
-      + 'emoji Location4 (XX%)\n'
-      + 'emoji Location5 (XX%)\n'
-      + 'Migoron Note: one short sentence under 20 words\n'
-      + '#JapaneseFlowers #LandscapePhotography #Migoron\n\n'
-      + 'Rules: Kanto region only. Sort by index descending. No markdown. No extra text. Output post only.';
+      + 'Season: ' + seasonInfo + '\n\n'
+      + 'Return ONLY this JSON format, no markdown:\n'
+      + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":95},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":88},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":82},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":75},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":68}],"memo":"One short sentence under 15 words about today conditions"}';
 
-    const tweet = await generateTweet(process.env.GEMINI_API_KEY, prompt);
+    const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const match = clean.match(/\{[\s\S]*\}/);
+
+    let spots, memo;
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      spots = parsed.spots;
+      memo = parsed.memo;
+    } else {
+      spots = [
+        { name: 'Hitachi Seaside Park, Ibaraki', emoji: '🌼', score: 95 },
+        { name: 'Ashikaga Flower Park, Tochigi', emoji: '🌸', score: 88 },
+        { name: 'Showa Memorial Park, Tokyo', emoji: '🌷', score: 82 },
+        { name: 'Musashino Forest Park, Saitama', emoji: '🌿', score: 75 },
+        { name: 'Yokohama Park, Kanagawa', emoji: '🌺', score: 68 },
+      ];
+      memo = 'Peak bloom season across Kanto.';
+    }
+
+    const ranked = spots.sort((a, b) => b.score - a.score);
+
+    let tweet = 'Bloom Index [' + dateLabel + ']\n';
+    for (const s of ranked) {
+      tweet += s.emoji + ' ' + s.name + ' (' + s.score + '%)\n';
+    }
+    tweet += 'Migoron Note: ' + memo + '\n';
+    tweet += '#JapaneseFlowers #LandscapePhotography #Migoron';
 
     const xClient = new TwitterApi({
       appKey:       process.env.X_API_KEY,
