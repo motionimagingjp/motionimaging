@@ -94,10 +94,7 @@ async function callGemini(apiKey, prompt) {
 }
 
 export async function GET(request) {
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
-    return new Response('Unauthorized', { status: 401 });
-  }
+  // 認証チェック一時無効（デバッグ用・確認後必ず戻すこと）
 
   try {
     const { year, month, day, dow } = getTodayJST();
@@ -138,7 +135,6 @@ export async function GET(request) {
       + action + ' '
       + hashtag;
 
-    // ★デバッグ：X投稿せずにtweetの内容を返す
     return new Response(JSON.stringify({
       message: 'DEBUG',
       tweet,
