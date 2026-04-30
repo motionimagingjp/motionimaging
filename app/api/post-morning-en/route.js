@@ -1,25 +1,6 @@
 import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
 
-function getSunriseUTC(date) {
-  const lat = 35.6762, lng = 139.6503;
-  const rad = Math.PI / 180;
-  const N = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
-  const B = 360 / 365 * (N - 81) * rad;
-  const EoT = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
-  const declination = 23.45 * Math.sin(B) * rad;
-  const hourAngle = Math.acos(-Math.tan(lat * rad) * Math.tan(declination)) / rad;
-  const solarNoon = 12 - lng / 15 - EoT / 60;
-  return solarNoon - hourAngle / 15;
-}
-
-function isNearSunrise() {
-  const now = new Date();
-  const sunriseUTC = getSunriseUTC(now);
-  const nowHours = now.getUTCHours() + now.getUTCMinutes() / 60;
-  return Math.abs(nowHours - (sunriseUTC - 0.5)) <= 10 / 60;
-}
-
 function getTodayLabelEN() {
   const jst = new Date(Date.now() + 9 * 3600000);
   return jst.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'Asia/Tokyo' });
@@ -73,25 +54,18 @@ export async function GET(request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  if (!isNearSunrise()) {
-    return new Response(JSON.stringify({ message: 'Skipped: not near sunrise' }), { status: 200 });
-  }
-
   try {
     const dateLabel = getTodayLabelEN();
     const sakura = isSakuraSeason();
     const flowers = getSeasonalFlowersEN();
 
-    let seasonInfo;
-    if (sakura) {
-      seasonInfo = 'Sakura season (February 1 to April 15). Estimate accumulated temperature since February 1. Bloom starts at 210 degrees C (index 50 percent). Full bloom at 370 degrees C (index 90 percent or higher). Select 5 real sakura spots in Kanto and nearby. Factor in elevation and regional differences.';
-    } else {
-      seasonInfo = 'Current season flowers in Kanto and nearby: ' + flowers.join(', ') + '. Select 5 real locations where these flowers are at peak bloom now. No temperature calculation needed.';
-    }
+    const sakuraInstruction = sakura
+      ? 'Sakura season (February 1 to April 15). Estimate accumulated temperature since February 1. Bloom starts at 210 degrees C (index 50 percent). Full bloom at 370 degrees C (index 90 percent or higher). Select 5 real sakura spots in Kanto and nearby. Factor in elevation and regional differences.'
+      : 'Current season flowers in Kanto and nearby: ' + flowers.join(', ') + '. Select 5 real locations where these flowers are at peak bloom now. No temperature calculation needed.';
 
     const prompt = 'You are the social media manager for Migoron, a Japanese landscape photography account. Write an English post for professional landscape photographers, 30 minutes before sunrise in Japan.\n\n'
       + 'Date: ' + dateLabel + '\n'
-      + 'Season info: ' + seasonInfo + '\n\n'
+      + 'Season info: ' + sakuraInstruction + '\n\n'
       + 'Requirements:\n'
       + 'Start with: Bloom Index [' + dateLabel + ']\n'
       + 'List 5 flower spots in Kanto region only\n'
