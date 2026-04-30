@@ -33,6 +33,29 @@ function getSeasonalFlowers() {
   return [];
 }
 
+async function getWeather() {
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&forecast_days=1';
+    const res = await fetch(url);
+    const data = await res.json();
+    const code = data.daily.weathercode[0];
+    const max  = Math.round(data.daily.temperature_2m_max[0]);
+    let weather, penalty;
+    if (code === 0)      { weather = '快晴';     penalty = 0;  }
+    else if (code <= 2)  { weather = '晴れ';     penalty = 0;  }
+    else if (code <= 3)  { weather = '曇り';     penalty = 10; }
+    else if (code <= 49) { weather = '霧';       penalty = 20; }
+    else if (code <= 67) { weather = '雨';       penalty = 30; }
+    else if (code <= 69) { weather = '大雨';     penalty = 40; }
+    else if (code <= 79) { weather = '雪';       penalty = 40; }
+    else if (code <= 84) { weather = 'にわか雨'; penalty = 20; }
+    else                 { weather = '荒天';     penalty = 50; }
+    return { weather, penalty, max };
+  } catch {
+    return { weather: '不明', penalty: 0, max: '--' };
+  }
+}
+
 async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
@@ -64,10 +87,7 @@ export async function GET(request) {
     const dateLabel = getTodayLabel();
     const sakura = isSakuraSeason();
     const flowers = getSeasonalFlowers();
-
-    const spots = sakura
-      ? ['高遠城址公園（長野）', '吉野山（奈良）', '千鳥ヶ淵（東京）', '目黒川（東京）', '新宿御苑（東京）']
-      : flowers.slice(0, 2).map(f => f + 'の名所');
+    const { weather, penalty, max } = await getWeather();
 
     const seasonInfo = sakura
       ? '桜シーズン。2月1日からの積算温度で開花進捗を算出（開花210℃/満開370℃）。関東・近郊の桜名所5件。'
@@ -75,31 +95,33 @@ export async function GET(request) {
 
     const prompt = '以下の条件で花スポット5件のミゴロン指数を算出してください。\n'
       + '条件：' + seasonInfo + '\n'
-      + '日付：' + dateLabel + '\n\n'
+      + '日付：' + dateLabel + '\n'
+      + '今日の天気：' + weather + '（最高' + max + '℃）\n'
+      + '天気による指数補正：各スポットの指数から' + penalty + '%を差し引くこと。晴れ系は補正なし。\n\n'
       + '必ず以下のJSON形式のみで返してください。マークダウン不要。\n'
-      + '{"spots":[{"name":"ひたち海浜公園（茨城）","emoji":"🌼","score":95},{"name":"あしかがフラワーパーク（栃木）","emoji":"🌸","score":88},{"name":"昭和記念公園（東京）","emoji":"🌷","score":82},{"name":"国営武蔵丘陵森林公園（埼玉）","emoji":"🌿","score":75},{"name":"横浜公園（神奈川）","emoji":"🌺","score":68}],"memo":"今朝の光と空気感を一言で"}';
+      + '{"spots":[{"name":"ひたち海浜公園（茨城）","emoji":"🌼","score":65},{"name":"あしかがフラワーパーク（栃木）","emoji":"🌸","score":58},{"name":"昭和記念公園（東京）","emoji":"🌷","score":52},{"name":"国営武蔵丘陵森林公園（埼玉）","emoji":"🌿","score":45},{"name":"横浜公園（神奈川）","emoji":"🌺","score":38}],"memo":"今朝のコンディションを一言で"}';
 
     const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
     const clean = raw.replace(/```json|```/g, '').trim();
     const match = clean.match(/\{[\s\S]*\}/);
 
-    let spots2, memo;
+    let spots, memo;
     if (match) {
       const parsed = JSON.parse(match[0]);
-      spots2 = parsed.spots;
+      spots = parsed.spots;
       memo = parsed.memo;
     } else {
-      spots2 = [
-        { name: 'ひたち海浜公園（茨城）', emoji: '🌼', score: 95 },
-        { name: 'あしかがフラワーパーク（栃木）', emoji: '🌸', score: 88 },
-        { name: '昭和記念公園（東京）', emoji: '🌷', score: 82 },
-        { name: '国営武蔵丘陵森林公園（埼玉）', emoji: '🌿', score: 75 },
-        { name: '横浜公園（神奈川）', emoji: '🌺', score: 68 },
+      spots = [
+        { name: 'ひたち海浜公園（茨城）', emoji: '🌼', score: Math.max(10, 95 - penalty) },
+        { name: 'あしかがフラワーパーク（栃木）', emoji: '🌸', score: Math.max(10, 88 - penalty) },
+        { name: '昭和記念公園（東京）', emoji: '🌷', score: Math.max(10, 82 - penalty) },
+        { name: '国営武蔵丘陵森林公園（埼玉）', emoji: '🌿', score: Math.max(10, 75 - penalty) },
+        { name: '横浜公園（神奈川）', emoji: '🌺', score: Math.max(10, 68 - penalty) },
       ];
-      memo = '朝の光が美しい季節です。';
+      memo = weather + 'のため撮影条件に注意。';
     }
 
-    const ranked = spots2.sort((a, b) => b.score - a.score);
+    const ranked = spots.sort((a, b) => b.score - a.score);
 
     let tweet = '花畑指数【' + dateLabel + '】\n';
     for (const s of ranked) {
@@ -117,7 +139,7 @@ export async function GET(request) {
 
     await xClient.v2.tweet(tweet);
 
-    return new Response(JSON.stringify({ message: 'Success', tweet }), { status: 200 });
+    return new Response(JSON.stringify({ message: 'Success', tweet, weather, penalty }), { status: 200 });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
