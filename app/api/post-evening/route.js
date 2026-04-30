@@ -1,25 +1,6 @@
 import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
 
-function getSunsetUTC(date) {
-  const lat = 35.6762, lng = 139.6503;
-  const rad = Math.PI / 180;
-  const N = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
-  const B = 360 / 365 * (N - 81) * rad;
-  const EoT = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
-  const declination = 23.45 * Math.sin(B) * rad;
-  const hourAngle = Math.acos(-Math.tan(lat * rad) * Math.tan(declination)) / rad;
-  const solarNoon = 12 - lng / 15 - EoT / 60;
-  return solarNoon + hourAngle / 15;
-}
-
-function isNearSunset() {
-  const now = new Date();
-  const sunsetUTC = getSunsetUTC(now);
-  const nowHours = now.getUTCHours() + now.getUTCMinutes() / 60;
-  return Math.abs(nowHours - (sunsetUTC + 0.5)) <= 10 / 60;
-}
-
 function getTomorrowLabel() {
   const jst = new Date(Date.now() + 9 * 3600000);
   jst.setDate(jst.getDate() + 1);
@@ -45,10 +26,6 @@ export async function GET(request) {
   const authHeader = request.headers.get('authorization');
   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
     return new Response('Unauthorized', { status: 401 });
-  }
-
-  if (!isNearSunset()) {
-    return new Response(JSON.stringify({ message: 'Skipped: not near sunset' }), { status: 200 });
   }
 
   try {
