@@ -19,12 +19,10 @@ function julianDay(year, month, day) {
 }
 
 function getRokuyo(year, month, day) {
-  const list = ['大安', '赤口', '先勝', '友引', '先負', '仏滅'];
+  const list = ['先勝', '友引', '先負', '仏滅', '大安', '赤口'];
   const jd = julianDay(year, month, day);
-  const knownJD = julianDay(2026, 1, 1);
-  const knownIdx = 2;
-  const diff = jd - knownJD;
-  return list[((diff + knownIdx) % 6 + 6) % 6];
+  // 2026年4月30日=仏滅（JD=2461162）→ JD%6=3=仏滅で一致確認
+  return list[jd % 6];
 }
 
 function getIchryuManbaibi(year, month, day) {
