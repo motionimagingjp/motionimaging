@@ -87,8 +87,8 @@ async function getWeather() {
     else if (code <= 2)  { weather = '晴れ';     score = 90;  }
     else if (code <= 3)  { weather = '曇り';     score = 70;  }
     else if (code <= 49) { weather = '霧';       score = 50;  }
-    else if (code <= 59) { weather = '霧雨';     score = 40;  }
-    else if (code <= 69) { weather = '雨';       score = 30;  }
+    else if (code <= 67) { weather = '雨';       score = 30;  }
+    else if (code <= 69) { weather = '大雨';     score = 20;  }
     else if (code <= 79) { weather = '雪';       score = 20;  }
     else if (code <= 84) { weather = 'にわか雨'; score = 35;  }
     else                 { weather = '荒天';     score = 10;  }
@@ -102,89 +102,4 @@ async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.8,
-        maxOutputTokens: 100,
-        thinkingConfig: { thinkingBudget: 0 }
-      }
-    })
-  });
-  const data = await res.json();
-  if (data.error) throw new Error('Gemini Error: ' + data.error.message);
-  const parts = data.candidates[0].content.parts;
-  const textPart = parts.find(p => p.text && !p.thought);
-  const text = textPart ? textPart.text : parts[parts.length - 1].text;
-  return text.trim().replace(/\n/g, '');
-}
-
-export async function GET(request) {
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  try {
-    const { year, month, day, dow } = getTodayJST();
-    const rokuyo   = getRokuyo(year, month, day);
-    const isIchryu = getIchryuManbaibi(year, month, day);
-    const isTensha = getTenshaDay(year, month, day);
-    const holiday  = getHoliday(year, month, day);
-    const { weather, score: weatherScore, max, min } = await getWeather();
-
-    let outing = weatherScore;
-    if (rokuyo === '大安')  outing = Math.min(100, outing + 10);
-    if (rokuyo === '仏滅')  outing = Math.max(10,  outing - 20);
-    if (rokuyo === '赤口')  outing = Math.max(10,  outing - 10);
-    if (isIchryu)           outing = Math.min(100, outing + 10);
-    if (isTensha)           outing = Math.min(100, outing + 15);
-
-    const senjiList = [];
-    if (isIchryu) senjiList.push('一粒万倍日');
-    if (isTensha) senjiList.push('天赦日');
-    const senjiText = senjiList.length > 0 ? '・' + senjiList.join('・') : '';
-
-    const dateText = year + '年' + month + '月' + day + '日(' + dow + ')'
-      + (holiday ? '・' + holiday : '')
-      + '・' + rokuyo + senjiText;
-
-    const hashtag = '#開運 #お出かけ #' + (senjiList[0] || rokuyo);
-
-    const actionPrompt = 'Output only the final answer in Japanese. No thinking, no explanation, no reasoning.\n'
-      + 'お出かけを促す開運アクションを1文で書いてください。\n'
-      + '六曜：' + rokuyo + '\n'
-      + '天気：東京' + weather + '（最高' + max + '℃）\n'
-      + '選日：' + (senjiText || 'なし') + '\n'
-      + '条件：30文字以内、前向きな内容、文章のみ出力';
-
-    const action = await callGemini(process.env.GEMINI_API_KEY, actionPrompt);
-
-    const tweet = '⛩️お出かけ指数' + outing + '％ '
-      + dateText + ' '
-      + '東京' + weather + '（最高' + max + '℃）'
-      + action + ' '
-      + hashtag;
-
-    const xClient = new TwitterApi({
-      appKey:       process.env.X_API_KEY,
-      appSecret:    process.env.X_API_SECRET,
-      accessToken:  process.env.X_ACCESS_TOKEN,
-      accessSecret: process.env.X_ACCESS_SECRET,
-    });
-
-    await xClient.v2.tweet(tweet);
-
-    return new Response(JSON.stringify({
-      message: 'Success',
-      tweet,
-      outing,
-      rokuyo,
-      weather
-    }), { status: 200 });
-
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
-}
+    headers: { 'Content-Type': 'appl
