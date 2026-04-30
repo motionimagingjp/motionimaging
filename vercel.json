@@ -1,8 +1,16 @@
+**`vercel.json`（上書き）**
+
+```json
 {
   "crons": [
-    {
-      "path": "/api/post-daily",
-      "schedule": "15 12 * * *"
-    }
+    { "path": "/api/post-morning",    "schedule": "50 18 * * *" },
+    { "path": "/api/post-morning-en", "schedule": "50 18 * * *" },
+    { "path": "/api/post-evening",    "schedule": "30 8 * * *"  },
+    { "path": "/api/post-daily",      "schedule": "15 12 * * *" }
   ]
 }
+```
+
+これをGitHubの`vercel.json`に上書きしてください。
+
+完了したら次の`app/api/post-morning/route.js`を出します！
