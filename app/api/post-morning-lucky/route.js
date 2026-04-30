@@ -121,7 +121,10 @@ async function callGemini(apiKey, prompt) {
 }
 
 export async function GET(request) {
-  // 認証チェック一時無効（デバッグ用・確認後必ず戻すこと）
+  const authHeader = request.headers.get('authorization');
+  if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
+    return new Response('Unauthorized', { status: 401 });
+  }
 
   try {
     const { year, month, day, dow } = getTodayJST();
@@ -164,14 +167,21 @@ export async function GET(request) {
       + action + ' '
       + hashtag;
 
+    const xClient = new TwitterApi({
+      appKey:       process.env.X_API_KEY,
+      appSecret:    process.env.X_API_SECRET,
+      accessToken:  process.env.X_ACCESS_TOKEN,
+      accessSecret: process.env.X_ACCESS_SECRET,
+    });
+
+    await xClient.v2.tweet(tweet);
+
     return new Response(JSON.stringify({
-      message: 'DEBUG',
+      message: 'Success',
       tweet,
-      length: tweet.length,
       outing,
       rokuyo,
-      weather,
-      action
+      weather
     }), { status: 200 });
 
   } catch (error) {
