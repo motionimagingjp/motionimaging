@@ -2,7 +2,7 @@
   "crons": [
     { "path": "/api/post-morning",    "schedule": "50 18 * * *" },
     { "path": "/api/post-morning-en", "schedule": "50 18 * * *" },
-    { "path": "/api/post-evening",    "schedule": "30 8 * * *"  },
+    { "path": "/api/post-evening",    "schedule": "5 9 * * *"   },
     { "path": "/api/post-daily",      "schedule": "15 12 * * *" }
   ]
 }
