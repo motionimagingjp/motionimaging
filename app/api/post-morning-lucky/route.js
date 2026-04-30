@@ -103,7 +103,7 @@ async function getWeather() {
 
 async function callGemini(apiKey, prompt) {
   // gemini-2.0-flashを使用（思考モードなし）
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=' + apiKey;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
