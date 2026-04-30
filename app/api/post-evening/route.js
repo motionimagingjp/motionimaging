@@ -30,7 +30,7 @@ async function callGemini(apiKey, prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 300 }
+      generationConfig: { temperature: 0.5, maxOutputTokens: 300 }
     })
   });
   const data = await res.json();
@@ -56,23 +56,32 @@ export async function GET(request) {
       '秩父（埼玉）',
     ];
 
-    // Geminiには指数5つとメモだけ生成させる
-    const prompt = '月齢' + moon.age + '日（' + moon.label + '）今夜の気象条件から以下5スポットの星空指数を算出してください。\n'
-      + spots.join('、') + '\n\n'
-      + '月齢補正：' + moon.effect + '\n\n'
-      + '以下のJSON形式のみで出力。説明不要。\n'
-      + '{"scores":[75,70,65,60,55],"memo":"新月で全域好条件です"}';
+    const prompt = '月齢' + moon.age + '日（' + moon.label + '）の夜の星空指数を5スポット分算出してください。\n'
+      + '月齢補正：' + moon.effect + '\n'
+      + 'スポット：' + spots.join('、') + '\n\n'
+      + '必ず以下のJSON形式のみで返してください。マークダウン不要。\n'
+      + '{"scores":[75,70,65,60,55],"memo":"条件コメント30文字以内"}\n'
+      + 'scoresは各スポットの順番通りに整数で。memoは30文字以内。';
 
     const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
 
-    // JSON抽出
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('JSON parse failed: ' + raw);
-    const parsed = JSON.parse(match[0]);
-    const scores = parsed.scores;
-    const memo = parsed.memo;
+    // JSON抽出（コードブロックも考慮）
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const match = clean.match(/\{[\s\S]*\}/);
 
-    // スポットと指数を組み合わせてソート
+    let scores, memo;
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      scores = parsed.scores;
+      memo = parsed.memo;
+    } else {
+      // フォールバック：月齢から自動で指数を設定
+      const base = moon.age <= 7 ? 80 : moon.age <= 17 ? 55 : 70;
+      scores = [base, base-5, base-10, base-15, base-20];
+      memo = moon.label + 'の夜、条件を確認してください。';
+    }
+
+    // ソート
     const ranked = spots
       .map((name, i) => ({ name, score: scores[i] }))
       .sort((a, b) => b.score - a.score);
