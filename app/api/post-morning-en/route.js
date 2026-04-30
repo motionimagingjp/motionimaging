@@ -63,22 +63,19 @@ export async function GET(request) {
       ? 'Sakura season (February 1 to April 15). Estimate accumulated temperature since February 1. Bloom starts at 210 degrees C (index 50 percent). Full bloom at 370 degrees C (index 90 percent or higher). Select 5 real sakura spots in Kanto and nearby. Factor in elevation and regional differences.'
       : 'Current season flowers in Kanto and nearby: ' + flowers.join(', ') + '. Select 5 real locations where these flowers are at peak bloom now. No temperature calculation needed.';
 
-    const prompt = 'You are the social media manager for Migoron, a Japanese landscape photography account. Write an English post for professional landscape photographers, 30 minutes before sunrise in Japan.\n\n'
+    const prompt = 'You are the social media manager for Migoron, a Japanese landscape photography account.\n\n'
       + 'Date: ' + dateLabel + '\n'
-      + 'Season info: ' + sakuraInstruction + '\n\n'
-      + 'Requirements:\n'
-      + 'Start with: Bloom Index [' + dateLabel + ']\n'
-      + 'List 5 flower spots in Kanto region only\n'
-      + 'Each spot gets an emoji and Migoron Index (XX%)\n'
-      + 'Sort by index descending\n'
-      + 'Add a Migoron Note: one sentence on why this spot is ideal today\n'
-      + 'Write in the voice of a seasoned professional landscape photographer\n'
-      + 'English only\n'
-      + 'No markdown, no bullet points\n'
-      + 'Each item on its own line\n'
-      + 'End with: #JapaneseFlowers #LandscapePhotography #Migoron\n'
-      + 'No camera settings (f-stop, shutter speed, ISO etc.)\n'
-      + 'Output post text only';
+      + 'Season: ' + sakuraInstruction + '\n\n'
+      + 'Write a post with EXACTLY this format and nothing else:\n'
+      + 'Bloom Index [' + dateLabel + ']\n'
+      + 'emoji Location1 (XX%)\n'
+      + 'emoji Location2 (XX%)\n'
+      + 'emoji Location3 (XX%)\n'
+      + 'emoji Location4 (XX%)\n'
+      + 'emoji Location5 (XX%)\n'
+      + 'Migoron Note: one short sentence under 20 words\n'
+      + '#JapaneseFlowers #LandscapePhotography #Migoron\n\n'
+      + 'Rules: Kanto region only. Sort by index descending. No markdown. No extra text. Output post only.';
 
     const tweet = await generateTweet(process.env.GEMINI_API_KEY, prompt);
 
