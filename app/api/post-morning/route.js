@@ -1,9 +1,9 @@
 import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
 
-function getTodayLabel() {
+function getTodayLabelEN() {
   const jst = new Date(Date.now() + 9 * 3600000);
-  return `${jst.getMonth() + 1}月${jst.getDate()}日`;
+  return jst.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'Asia/Tokyo' });
 }
 
 function isSakuraSeason() {
@@ -13,82 +13,96 @@ function isSakuraSeason() {
   return (m === 2) || (m === 3) || (m === 4 && d <= 15);
 }
 
-function getSeasonalFlowers() {
+function getSeasonalFlowersEN() {
   const jst = new Date(Date.now() + 9 * 3600000);
   const m = jst.getMonth() + 1;
   const d = jst.getDate();
-  if (m === 1)            return ['水仙', '蝋梅'];
-  if (m === 2)            return ['梅', '菜の花', '水仙'];
-  if (m === 3)            return ['桜', '菜の花', '梅'];
-  if (m === 4 && d <= 15) return ['桜', '菜の花', 'チューリップ'];
-  if (m === 4 && d > 15)  return ['ネモフィラ', 'ツツジ', '藤', 'チューリップ'];
-  if (m === 5)            return ['ネモフィラ', 'ツツジ', '藤', 'バラ'];
-  if (m === 6)            return ['紫陽花', 'バラ', 'ポピー', 'ラベンダー'];
-  if (m === 7)            return ['ひまわり', '蓮', 'ラベンダー'];
-  if (m === 8)            return ['ひまわり', '蓮'];
-  if (m === 9)            return ['彼岸花', 'コスモス'];
-  if (m === 10)           return ['コスモス', '紅葉'];
-  if (m === 11)           return ['紅葉', 'コスモス'];
-  if (m === 12)           return ['水仙', '蝋梅'];
+  if (m === 1)            return ['Narcissus', 'Japanese winter sweet'];
+  if (m === 2)            return ['Japanese plum', 'Rapeseed blossom', 'Narcissus'];
+  if (m === 3)            return ['Cherry blossom', 'Rapeseed blossom', 'Japanese plum'];
+  if (m === 4 && d <= 15) return ['Cherry blossom', 'Rapeseed blossom', 'Tulip'];
+  if (m === 4 && d > 15)  return ['Nemophila', 'Azalea', 'Wisteria', 'Tulip'];
+  if (m === 5)            return ['Nemophila', 'Azalea', 'Wisteria', 'Rose'];
+  if (m === 6)            return ['Hydrangea', 'Rose', 'Poppy', 'Lavender'];
+  if (m === 7)            return ['Sunflower', 'Lotus', 'Lavender'];
+  if (m === 8)            return ['Sunflower', 'Lotus'];
+  if (m === 9)            return ['Red spider lily', 'Cosmos'];
+  if (m === 10)           return ['Cosmos', 'Autumn foliage'];
+  if (m === 11)           return ['Autumn foliage', 'Cosmos'];
+  if (m === 12)           return ['Narcissus', 'Japanese winter sweet'];
   return [];
 }
 
-async function generateTweet(apiKey, prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+async function callGemini(apiKey, prompt) {
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 1500 }
+      generationConfig: {
+        temperature: 0.8,
+        maxOutputTokens: 300,
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     })
   });
   const data = await res.json();
-  if (data.error) throw new Error(`Gemini Error: ${data.error.message}`);
-  return data.candidates[0].content.parts[0].text.trim();
+  if (data.error) throw new Error('Gemini Error: ' + data.error.message);
+  const parts = data.candidates[0].content.parts;
+  const textPart = parts.find(p => p.text && !p.thought);
+  return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
 export async function GET(request) {
   const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
     return new Response('Unauthorized', { status: 401 });
   }
 
   try {
-    const dateLabel = getTodayLabel();
+    const dateLabel = getTodayLabelEN();
     const sakura = isSakuraSeason();
-    const flowers = getSeasonalFlowers();
+    const flowers = getSeasonalFlowersEN();
 
-    const sakuraInstruction = sakura
-      ? `【桜シーズン特別ルール】
-今日は桜シーズン（2月〜4月15日）です。
-2月1日を起算日として今日までの積算温度（日平均気温の合算）を推定し、以下の基準でミゴロン指数を算出すること。
-開花目安：積算温度210℃（指数50%前後）
-満開目安：積算温度370℃（指数90%以上）
-関東・近郊の実在する桜の名所5件を選び、各地点の標高・地域差を考慮して指数に差をつけること。`
-      : `【季節の花ルール】
-今の時期（${dateLabel}）に関東・近郊で実際に見頃を迎えている花を選ぶこと。
-今が旬の花：${flowers.join('、')}
-上記の花が咲いている関東・近郊の実在する名所を5件選ぶこと。
-積算温度の計算は不要。現在の季節感と一般的な開花情報からミゴロン指数を算出すること。`;
+    const seasonInfo = sakura
+      ? 'Cherry blossom season. Calculate bloom progress from Feb 1 accumulated temp (bloom at 210C, full bloom at 370C). Select 5 real sakura spots in Kanto.'
+      : 'In-season flowers: ' + flowers.join(', ') + '. Select 5 real flower spots in Kanto region.';
 
-    const prompt = `あなたは風景写真家アカウント「ミゴロン」のSNS担当です。日の出30分前の高揚感を伝える、カメラマンに刺さる投稿文を作成してください。
+    const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
+      + 'Date: ' + dateLabel + '\n'
+      + 'Season: ' + seasonInfo + '\n\n'
+      + 'Return ONLY this JSON format, no markdown:\n'
+      + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":95},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":88},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":82},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":75},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":68}],"memo":"One short sentence under 15 words about today conditions"}';
 
-${sakuraInstruction}
+    const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const match = clean.match(/\{[\s\S]*\}/);
 
-【投稿作成条件】
-花畑指数【${dateLabel}】で必ず始めること
-おすすめ花スポットを5件（関東・近郊の実在する名所のみ）
-各スポットに絵文字とミゴロン指数（XX%）を付ける
-指数が高い順に並べる
-ミゴロンメモとして今日その場所がなぜおすすめかの理由（光の条件、空気感、見頃のタイミングなど）を1文で書く
-マークダウン（**や##など）は使わない
-箇条書き（・や-）は使わず1行ずつシンプルに並べる
-ハッシュタグ3個（#花撮影 #風景写真 #ミゴロン）を最後に
-カメラの技術設定（F値、SS、ISO等）のアドバイスは絶対禁止
-投稿文のみ出力（前置き不要）`;
+    let spots, memo;
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      spots = parsed.spots;
+      memo = parsed.memo;
+    } else {
+      spots = [
+        { name: 'Hitachi Seaside Park, Ibaraki', emoji: '🌼', score: 95 },
+        { name: 'Ashikaga Flower Park, Tochigi', emoji: '🌸', score: 88 },
+        { name: 'Showa Memorial Park, Tokyo', emoji: '🌷', score: 82 },
+        { name: 'Musashino Forest Park, Saitama', emoji: '🌿', score: 75 },
+        { name: 'Yokohama Park, Kanagawa', emoji: '🌺', score: 68 },
+      ];
+      memo = 'Peak bloom season across Kanto.';
+    }
 
-    const tweet = await generateTweet(process.env.GEMINI_API_KEY, prompt);
+    const ranked = spots.sort((a, b) => b.score - a.score);
+
+    let tweet = 'Bloom Index [' + dateLabel + ']\n';
+    for (const s of ranked) {
+      tweet += s.emoji + ' ' + s.name + ' (' + s.score + '%)\n';
+    }
+    tweet += 'Migoron Note: ' + memo + '\n';
+    tweet += '#JapaneseFlowers #LandscapePhotography #Migoron';
 
     const xClient = new TwitterApi({
       appKey:       process.env.X_API_KEY,
