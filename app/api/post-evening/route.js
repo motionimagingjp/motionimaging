@@ -23,14 +23,14 @@ function getMoonInfo(age) {
   return           { age, label: '晦日月', effect: '新月に向け星空回復中、指数+5%補正' };
 }
 
-async function generateTweet(apiKey, prompt) {
+async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 1500 }
+      generationConfig: { temperature: 0.8, maxOutputTokens: 300 }
     })
   });
   const data = await res.json();
@@ -48,26 +48,42 @@ export async function GET(request) {
     const dateLabel = getTomorrowLabel();
     const moon = getMoonInfo(getMoonAge());
 
-    const prompt = 'あなたは風景写真家アカウント「ミゴロン」のSNS担当です。\n\n'
-      + '【今夜の月齢】月齢' + moon.age + '日（' + moon.label + '）' + moon.effect + '\n\n'
-      + '以下の5スポットの星指数を月齢・雲量・湿度から算出し、指数高い順に並べて出力してください。\n'
-      + '秩父（埼玉）、三浦（神奈川）、河口湖（山梨）、爪木崎（静岡）、大洗（茨城）\n\n'
-      + '【出力例・この形式のみ・一切変えるな】\n'
-      + 'ロケーション星指数予報【' + dateLabel + '】\n'
-      + '✨ 河口湖（山梨）(90%)\n'
-      + '✨ 大洗（茨城）(85%)\n'
-      + '✨ 爪木崎（静岡）(80%)\n'
-      + '✨ 三浦（神奈川）(70%)\n'
-      + '✨ 秩父（埼玉）(60%)\n'
-      + 'ミゴロンメモ：新月で透明度高く全域で星が期待できます。\n'
-      + '#星空撮影 #風景写真 #ミゴロン\n\n'
-      + '上記の形式だけで出力。説明・前置き一切不要。';
+    const spots = [
+      '河口湖（山梨）',
+      '爪木崎（静岡）',
+      '大洗（茨城）',
+      '三浦（神奈川）',
+      '秩父（埼玉）',
+    ];
 
-    let tweet = await generateTweet(process.env.GEMINI_API_KEY, prompt);
+    // Geminiには指数5つとメモだけ生成させる
+    const prompt = '月齢' + moon.age + '日（' + moon.label + '）今夜の気象条件から以下5スポットの星空指数を算出してください。\n'
+      + spots.join('、') + '\n\n'
+      + '月齢補正：' + moon.effect + '\n\n'
+      + '以下のJSON形式のみで出力。説明不要。\n'
+      + '{"scores":[75,70,65,60,55],"memo":"新月で全域好条件です"}';
 
-    if (tweet.length > 280) {
-      tweet = tweet.substring(0, 277) + '...';
+    const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
+
+    // JSON抽出
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('JSON parse failed: ' + raw);
+    const parsed = JSON.parse(match[0]);
+    const scores = parsed.scores;
+    const memo = parsed.memo;
+
+    // スポットと指数を組み合わせてソート
+    const ranked = spots
+      .map((name, i) => ({ name, score: scores[i] }))
+      .sort((a, b) => b.score - a.score);
+
+    // ツイート組み立て
+    let tweet = 'ロケーション星指数予報【' + dateLabel + '】\n';
+    for (const s of ranked) {
+      tweet += '✨ ' + s.name + '(' + s.score + '%)\n';
     }
+    tweet += 'ミゴロンメモ：' + memo + '\n';
+    tweet += '#星空撮影 #風景写真 #ミゴロン';
 
     const xClient = new TwitterApi({
       appKey:       process.env.X_API_KEY,
