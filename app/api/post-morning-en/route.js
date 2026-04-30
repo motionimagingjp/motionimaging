@@ -33,6 +33,29 @@ function getSeasonalFlowersEN() {
   return [];
 }
 
+async function getWeather() {
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&forecast_days=1';
+    const res = await fetch(url);
+    const data = await res.json();
+    const code = data.daily.weathercode[0];
+    const max  = Math.round(data.daily.temperature_2m_max[0]);
+    let weather, penalty;
+    if (code === 0)      { weather = 'clear skies';    penalty = 0;  }
+    else if (code <= 2)  { weather = 'sunny';          penalty = 0;  }
+    else if (code <= 3)  { weather = 'cloudy';         penalty = 10; }
+    else if (code <= 49) { weather = 'foggy';          penalty = 20; }
+    else if (code <= 67) { weather = 'rainy';          penalty = 30; }
+    else if (code <= 69) { weather = 'heavy rain';     penalty = 40; }
+    else if (code <= 79) { weather = 'snowy';          penalty = 40; }
+    else if (code <= 84) { weather = 'passing showers';penalty = 20; }
+    else                 { weather = 'stormy';         penalty = 50; }
+    return { weather, penalty, max };
+  } catch {
+    return { weather: 'unknown', penalty: 0, max: '--' };
+  }
+}
+
 async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
@@ -64,6 +87,7 @@ export async function GET(request) {
     const dateLabel = getTodayLabelEN();
     const sakura = isSakuraSeason();
     const flowers = getSeasonalFlowersEN();
+    const { weather, penalty, max } = await getWeather();
 
     const seasonInfo = sakura
       ? 'Cherry blossom season. Calculate bloom progress from Feb 1 accumulated temp (bloom at 210C, full bloom at 370C). Select 5 real sakura spots in Kanto.'
@@ -71,9 +95,11 @@ export async function GET(request) {
 
     const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
       + 'Date: ' + dateLabel + '\n'
-      + 'Season: ' + seasonInfo + '\n\n'
+      + 'Season: ' + seasonInfo + '\n'
+      + 'Weather today: ' + weather + ' (max ' + max + 'C)\n'
+      + 'Weather penalty: subtract ' + penalty + '% from each score due to weather conditions.\n\n'
       + 'Return ONLY this JSON format, no markdown:\n'
-      + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":95},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":88},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":82},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":75},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":68}],"memo":"One short sentence under 15 words about today conditions"}';
+      + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":65},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":58},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":52},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":45},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":38}],"memo":"One short sentence under 15 words about today conditions"}';
 
     const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
     const clean = raw.replace(/```json|```/g, '').trim();
@@ -86,13 +112,13 @@ export async function GET(request) {
       memo = parsed.memo;
     } else {
       spots = [
-        { name: 'Hitachi Seaside Park, Ibaraki', emoji: '🌼', score: 95 },
-        { name: 'Ashikaga Flower Park, Tochigi', emoji: '🌸', score: 88 },
-        { name: 'Showa Memorial Park, Tokyo', emoji: '🌷', score: 82 },
-        { name: 'Musashino Forest Park, Saitama', emoji: '🌿', score: 75 },
-        { name: 'Yokohama Park, Kanagawa', emoji: '🌺', score: 68 },
+        { name: 'Hitachi Seaside Park, Ibaraki', emoji: '🌼', score: Math.max(10, 95 - penalty) },
+        { name: 'Ashikaga Flower Park, Tochigi', emoji: '🌸', score: Math.max(10, 88 - penalty) },
+        { name: 'Showa Memorial Park, Tokyo', emoji: '🌷', score: Math.max(10, 82 - penalty) },
+        { name: 'Musashino Forest Park, Saitama', emoji: '🌿', score: Math.max(10, 75 - penalty) },
+        { name: 'Yokohama Park, Kanagawa', emoji: '🌺', score: Math.max(10, 68 - penalty) },
       ];
-      memo = 'Peak bloom season across Kanto.';
+      memo = weather + ' conditions today — plan accordingly.';
     }
 
     const ranked = spots.sort((a, b) => b.score - a.score);
@@ -113,7 +139,7 @@ export async function GET(request) {
 
     await xClient.v2.tweet(tweet);
 
-    return new Response(JSON.stringify({ message: 'Success', tweet }), { status: 200 });
+    return new Response(JSON.stringify({ message: 'Success', tweet, weather, penalty }), { status: 200 });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
