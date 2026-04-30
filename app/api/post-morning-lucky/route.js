@@ -21,7 +21,6 @@ function julianDay(year, month, day) {
 function getRokuyo(year, month, day) {
   const list = ['先勝', '友引', '先負', '仏滅', '大安', '赤口'];
   const jd = julianDay(year, month, day);
-  // 2026年4月30日=仏滅（JD=2461162）→ JD%6=3=仏滅で一致確認
   return list[jd % 6];
 }
 
@@ -115,7 +114,6 @@ async function callGemini(apiKey, prompt) {
   });
   const data = await res.json();
   if (data.error) throw new Error('Gemini Error: ' + data.error.message);
-  // 思考ブロックを除いてテキストのみ抽出
   const parts = data.candidates[0].content.parts;
   const textPart = parts.find(p => p.text && !p.thought);
   const text = textPart ? textPart.text : parts[parts.length - 1].text;
