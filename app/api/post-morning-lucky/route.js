@@ -18,14 +18,11 @@ function julianDay(year, month, day) {
   return day + Math.floor((153 * m + 2) / 5) + 365 * y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
 }
 
-// 旧暦月日から六曜を正確に計算
 function getRokuyo(year, month, day) {
   const list = ['大安', '赤口', '先勝', '友引', '先負', '仏滅'];
-  // 既知の対応表から計算（2026年）
-  // 旧暦変換の簡易計算
   const jd = julianDay(year, month, day);
-  const knownJD = julianDay(2026, 1, 1); // 2026年1月1日=先勝
-  const knownIdx = 2; // 先勝のインデックス
+  const knownJD = julianDay(2026, 1, 1);
+  const knownIdx = 2;
   const diff = jd - knownJD;
   return list[((diff + knownIdx) % 6 + 6) % 6];
 }
@@ -111,7 +108,11 @@ async function callGemini(apiKey, prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 200 }
+      generationConfig: {
+        temperature: 0.8,
+        maxOutputTokens: 200,
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     })
   });
   const data = await res.json();
@@ -148,10 +149,11 @@ export async function GET(request) {
 
     const hashtag = '#開運 #お出かけ #' + (senjiList[0] || rokuyo);
 
-    const actionPrompt = '次の文章の「　　」部分を埋めてください。30文字以内で。文章のみ出力。\n'
-      + '「今日は' + rokuyo + 'なので、　　。」\n'
-      + '天気：東京' + weather + '、気温最高' + max + '℃\n'
-      + '内容：お出かけや外出を促す前向きな開運アクション';
+    const actionPrompt = 'お出かけを促す開運アクションを1文で書いてください。\n'
+      + '六曜：' + rokuyo + '\n'
+      + '天気：東京' + weather + '（最高' + max + '℃）\n'
+      + '選日：' + (senjiText || 'なし') + '\n'
+      + '条件：30文字以内、前向きな内容、文章のみ出力';
 
     const action = await callGemini(process.env.GEMINI_API_KEY, actionPrompt);
 
