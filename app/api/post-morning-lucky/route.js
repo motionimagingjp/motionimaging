@@ -125,29 +125,30 @@ export async function GET(request) {
 
     const hashtag = '#開運 #お出かけ #' + (senjiList[0] || rokuyo);
 
-    // Geminiには開運アクション1文だけ生成させる
-    const actionPrompt = '東京の天気は' + weather + '、今日は' + rokuyo + senjiText + 'です。'
-      + 'お出かけを促す開運アクションを25文字以内の1文で。文章のみ出力。改行不要。';
+    const actionPrompt = 'あなたは開運コンサルタント兼ライフスタイルアドバイザーです。'
+      + '今日は' + dateText + '、東京の天気は' + weather + '（最高' + max + '℃・最低' + min + '℃）です。'
+      + '天気とお日柄を踏まえ、一般ユーザーの背中を押す具体的な開運アクションを30文字以内の1文で書いてください。'
+      + 'カメラ・撮影の言及禁止。文章のみ出力。改行不要。';
 
     const action = await callGemini(process.env.GEMINI_API_KEY, actionPrompt);
 
-    // ツイートをコード側で組み立て
     const tweet = '⛩️お出かけ指数' + outing + '％ '
       + dateText + ' '
       + '東京' + weather + '（最高' + max + '℃）'
       + action + ' '
       + hashtag;
 
-    const xClient = new TwitterApi({
-      appKey:       process.env.X_API_KEY,
-      appSecret:    process.env.X_API_SECRET,
-      accessToken:  process.env.X_ACCESS_TOKEN,
-      accessSecret: process.env.X_ACCESS_SECRET,
-    });
+    // ★デバッグ：X投稿せずにtweetの内容を返す
+    return new Response(JSON.stringify({
+      message: 'DEBUG',
+      tweet,
+      length: tweet.length,
+      outing,
+      rokuyo,
+      weather,
+      action
+    }), { status: 200 });
 
-    await xClient.v2.tweet(tweet);
-
-    return new Response(JSON.stringify({ message: 'Success', tweet, outing, rokuyo, weather }), { status: 200 });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
