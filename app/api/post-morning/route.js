@@ -1,9 +1,9 @@
 import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
 
-function getTodayLabelEN() {
+function getTodayLabel() {
   const jst = new Date(Date.now() + 9 * 3600000);
-  return jst.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'Asia/Tokyo' });
+  return `${jst.getMonth() + 1}月${jst.getDate()}日`;
 }
 
 function isSakuraSeason() {
@@ -13,23 +13,23 @@ function isSakuraSeason() {
   return (m === 2) || (m === 3) || (m === 4 && d <= 15);
 }
 
-function getSeasonalFlowersEN() {
+function getSeasonalFlowers() {
   const jst = new Date(Date.now() + 9 * 3600000);
   const m = jst.getMonth() + 1;
   const d = jst.getDate();
-  if (m === 1)            return ['Narcissus', 'Japanese winter sweet'];
-  if (m === 2)            return ['Japanese plum', 'Rapeseed blossom', 'Narcissus'];
-  if (m === 3)            return ['Cherry blossom', 'Rapeseed blossom', 'Japanese plum'];
-  if (m === 4 && d <= 15) return ['Cherry blossom', 'Rapeseed blossom', 'Tulip'];
-  if (m === 4 && d > 15)  return ['Nemophila', 'Azalea', 'Wisteria', 'Tulip'];
-  if (m === 5)            return ['Nemophila', 'Azalea', 'Wisteria', 'Rose'];
-  if (m === 6)            return ['Hydrangea', 'Rose', 'Poppy', 'Lavender'];
-  if (m === 7)            return ['Sunflower', 'Lotus', 'Lavender'];
-  if (m === 8)            return ['Sunflower', 'Lotus'];
-  if (m === 9)            return ['Red spider lily', 'Cosmos'];
-  if (m === 10)           return ['Cosmos', 'Autumn foliage'];
-  if (m === 11)           return ['Autumn foliage', 'Cosmos'];
-  if (m === 12)           return ['Narcissus', 'Japanese winter sweet'];
+  if (m === 1)            return ['水仙', '蝋梅'];
+  if (m === 2)            return ['梅', '菜の花', '水仙'];
+  if (m === 3)            return ['桜', '菜の花', '梅'];
+  if (m === 4 && d <= 15) return ['桜', '菜の花', 'チューリップ'];
+  if (m === 4 && d > 15)  return ['ネモフィラ', 'ツツジ', '藤', 'チューリップ'];
+  if (m === 5)            return ['ネモフィラ', 'ツツジ', '藤', 'バラ'];
+  if (m === 6)            return ['紫陽花', 'バラ', 'ポピー', 'ラベンダー'];
+  if (m === 7)            return ['ひまわり', '蓮', 'ラベンダー'];
+  if (m === 8)            return ['ひまわり', '蓮'];
+  if (m === 9)            return ['彼岸花', 'コスモス'];
+  if (m === 10)           return ['コスモス', '紅葉'];
+  if (m === 11)           return ['紅葉', 'コスモス'];
+  if (m === 12)           return ['水仙', '蝋梅'];
   return [];
 }
 
@@ -61,48 +61,52 @@ export async function GET(request) {
   }
 
   try {
-    const dateLabel = getTodayLabelEN();
+    const dateLabel = getTodayLabel();
     const sakura = isSakuraSeason();
-    const flowers = getSeasonalFlowersEN();
+    const flowers = getSeasonalFlowers();
+
+    const spots = sakura
+      ? ['高遠城址公園（長野）', '吉野山（奈良）', '千鳥ヶ淵（東京）', '目黒川（東京）', '新宿御苑（東京）']
+      : flowers.slice(0, 2).map(f => f + 'の名所');
 
     const seasonInfo = sakura
-      ? 'Cherry blossom season. Calculate bloom progress from Feb 1 accumulated temp (bloom at 210C, full bloom at 370C). Select 5 real sakura spots in Kanto.'
-      : 'In-season flowers: ' + flowers.join(', ') + '. Select 5 real flower spots in Kanto region.';
+      ? '桜シーズン。2月1日からの積算温度で開花進捗を算出（開花210℃/満開370℃）。関東・近郊の桜名所5件。'
+      : '今が旬の花：' + flowers.join('、') + '。関東・近郊の実在する名所5件を選ぶ。';
 
-    const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
-      + 'Date: ' + dateLabel + '\n'
-      + 'Season: ' + seasonInfo + '\n\n'
-      + 'Return ONLY this JSON format, no markdown:\n'
-      + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":95},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":88},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":82},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":75},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":68}],"memo":"One short sentence under 15 words about today conditions"}';
+    const prompt = '以下の条件で花スポット5件のミゴロン指数を算出してください。\n'
+      + '条件：' + seasonInfo + '\n'
+      + '日付：' + dateLabel + '\n\n'
+      + '必ず以下のJSON形式のみで返してください。マークダウン不要。\n'
+      + '{"spots":[{"name":"ひたち海浜公園（茨城）","emoji":"🌼","score":95},{"name":"あしかがフラワーパーク（栃木）","emoji":"🌸","score":88},{"name":"昭和記念公園（東京）","emoji":"🌷","score":82},{"name":"国営武蔵丘陵森林公園（埼玉）","emoji":"🌿","score":75},{"name":"横浜公園（神奈川）","emoji":"🌺","score":68}],"memo":"今朝の光と空気感を一言で"}';
 
     const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
     const clean = raw.replace(/```json|```/g, '').trim();
     const match = clean.match(/\{[\s\S]*\}/);
 
-    let spots, memo;
+    let spots2, memo;
     if (match) {
       const parsed = JSON.parse(match[0]);
-      spots = parsed.spots;
+      spots2 = parsed.spots;
       memo = parsed.memo;
     } else {
-      spots = [
-        { name: 'Hitachi Seaside Park, Ibaraki', emoji: '🌼', score: 95 },
-        { name: 'Ashikaga Flower Park, Tochigi', emoji: '🌸', score: 88 },
-        { name: 'Showa Memorial Park, Tokyo', emoji: '🌷', score: 82 },
-        { name: 'Musashino Forest Park, Saitama', emoji: '🌿', score: 75 },
-        { name: 'Yokohama Park, Kanagawa', emoji: '🌺', score: 68 },
+      spots2 = [
+        { name: 'ひたち海浜公園（茨城）', emoji: '🌼', score: 95 },
+        { name: 'あしかがフラワーパーク（栃木）', emoji: '🌸', score: 88 },
+        { name: '昭和記念公園（東京）', emoji: '🌷', score: 82 },
+        { name: '国営武蔵丘陵森林公園（埼玉）', emoji: '🌿', score: 75 },
+        { name: '横浜公園（神奈川）', emoji: '🌺', score: 68 },
       ];
-      memo = 'Peak bloom season across Kanto.';
+      memo = '朝の光が美しい季節です。';
     }
 
-    const ranked = spots.sort((a, b) => b.score - a.score);
+    const ranked = spots2.sort((a, b) => b.score - a.score);
 
-    let tweet = 'Bloom Index [' + dateLabel + ']\n';
+    let tweet = '花畑指数【' + dateLabel + '】\n';
     for (const s of ranked) {
-      tweet += s.emoji + ' ' + s.name + ' (' + s.score + '%)\n';
+      tweet += s.emoji + ' ' + s.name + '(' + s.score + '%)\n';
     }
-    tweet += 'Migoron Note: ' + memo + '\n';
-    tweet += '#JapaneseFlowers #LandscapePhotography #Migoron';
+    tweet += 'ミゴロンメモ：' + memo + '\n';
+    tweet += '#花撮影 #風景写真 #ミゴロン';
 
     const xClient = new TwitterApi({
       appKey:       process.env.X_API_KEY,
