@@ -102,8 +102,7 @@ async function getWeather() {
 }
 
 async function callGemini(apiKey, prompt) {
-  // gemini-2.0-flashを使用（思考モードなし）
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=' + apiKey;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -111,13 +110,18 @@ async function callGemini(apiKey, prompt) {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.8,
-        maxOutputTokens: 100
+        maxOutputTokens: 100,
+        thinkingConfig: { thinkingBudget: 0 }
       }
     })
   });
   const data = await res.json();
   if (data.error) throw new Error('Gemini Error: ' + data.error.message);
-  return data.candidates[0].content.parts[0].text.trim().replace(/\n/g, '');
+  // 思考ブロックを除いてテキストのみ抽出
+  const parts = data.candidates[0].content.parts;
+  const textPart = parts.find(p => p.text && !p.thought);
+  const text = textPart ? textPart.text : parts[parts.length - 1].text;
+  return text.trim().replace(/\n/g, '');
 }
 
 export async function GET(request) {
@@ -149,7 +153,8 @@ export async function GET(request) {
 
     const hashtag = '#開運 #お出かけ #' + (senjiList[0] || rokuyo);
 
-    const actionPrompt = 'お出かけを促す開運アクションを1文で書いてください。\n'
+    const actionPrompt = 'Output only the final answer in Japanese. No thinking, no explanation, no reasoning.\n'
+      + 'お出かけを促す開運アクションを1文で書いてください。\n'
       + '六曜：' + rokuyo + '\n'
       + '天気：東京' + weather + '（最高' + max + '℃）\n'
       + '選日：' + (senjiText || 'なし') + '\n'
