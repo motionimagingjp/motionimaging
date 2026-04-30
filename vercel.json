@@ -1,6 +1,3 @@
-**`vercel.json`（上書き）**
-
-```json
 {
   "crons": [
     { "path": "/api/post-morning",    "schedule": "50 18 * * *" },
