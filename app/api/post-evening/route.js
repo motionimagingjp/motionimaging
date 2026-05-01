@@ -1,9 +1,8 @@
 import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
 
-function getTomorrowLabel() {
+function getTodayLabel() {
   const jst = new Date(Date.now() + 9 * 3600000);
-  jst.setDate(jst.getDate() + 1);
   return `${jst.getMonth() + 1}月${jst.getDate()}日`;
 }
 
@@ -30,12 +29,18 @@ async function callGemini(apiKey, prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.5, maxOutputTokens: 300 }
+      generationConfig: {
+        temperature: 0.8,
+        maxOutputTokens: 300,
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     })
   });
   const data = await res.json();
   if (data.error) throw new Error('Gemini Error: ' + data.error.message);
-  return data.candidates[0].content.parts[0].text.trim();
+  const parts = data.candidates[0].content.parts;
+  const textPart = parts.find(p => p.text && !p.thought);
+  return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
 export async function GET(request) {
@@ -45,7 +50,7 @@ export async function GET(request) {
   }
 
   try {
-    const dateLabel = getTomorrowLabel();
+    const dateLabel = getTodayLabel();
     const moon = getMoonInfo(getMoonAge());
 
     const spots = [
@@ -64,8 +69,6 @@ export async function GET(request) {
       + 'scoresは各スポットの順番通りに整数で。memoは30文字以内。';
 
     const raw = await callGemini(process.env.GEMINI_API_KEY, prompt);
-
-    // JSON抽出（コードブロックも考慮）
     const clean = raw.replace(/```json|```/g, '').trim();
     const match = clean.match(/\{[\s\S]*\}/);
 
@@ -75,19 +78,16 @@ export async function GET(request) {
       scores = parsed.scores;
       memo = parsed.memo;
     } else {
-      // フォールバック：月齢から自動で指数を設定
       const base = moon.age <= 7 ? 80 : moon.age <= 17 ? 55 : 70;
       scores = [base, base-5, base-10, base-15, base-20];
       memo = moon.label + 'の夜、条件を確認してください。';
     }
 
-    // ソート
     const ranked = spots
       .map((name, i) => ({ name, score: scores[i] }))
       .sort((a, b) => b.score - a.score);
 
-    // ツイート組み立て
-    let tweet = 'ロケーション星指数予報【' + dateLabel + '】\n';
+    let tweet = '今夜星指数予報【' + dateLabel + '】\n';
     for (const s of ranked) {
       tweet += '✨ ' + s.name + '(' + s.score + '%)\n';
     }
