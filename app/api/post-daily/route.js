@@ -137,4 +137,56 @@ async function buildFujisanTweet(apiKey, dateLabel) {
   }
   tweet += 'ミゴロンメモ：' + memo + '\n';
   tweet += '⏰' + time + 'がベスト\n';
-  tweet +=
+  tweet += '#富士山 #風景写真 #ミゴロン';
+  return tweet;
+}
+
+export async function GET(request) {
+  const authHeader = request.headers.get('authorization');
+  if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  try {
+    const API_KEY   = process.env.GEMINI_API_KEY;
+    const dateLabel = getTomorrowLabel();
+
+    const flowerTweet   = await buildFlowerTweet(API_KEY, dateLabel);
+    const cloudSeaTweet = await buildCloudSeaTweet(API_KEY, dateLabel);
+    const fujisanTweet  = await buildFujisanTweet(API_KEY, dateLabel);
+
+    const xClient = new TwitterApi({
+      appKey:       process.env.X_API_KEY,
+      appSecret:    process.env.X_API_SECRET,
+      accessToken:  process.env.X_ACCESS_TOKEN,
+      accessSecret: process.env.X_ACCESS_SECRET,
+    });
+
+    const results = {};
+    for (const [key, text] of [
+      ['cloud_sea', cloudSeaTweet],
+      ['fujisan',   fujisanTweet],
+      ['flower',    flowerTweet],
+    ]) {
+      try {
+        await xClient.v2.tweet(text);
+        results[key] = { ok: true, tweet: text };
+      } catch (err) {
+        results[key] = { ok: false, error: err.message };
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    return new Response(JSON.stringify({
+      message: 'Success',
+      date: dateLabel,
+      results
+    }), { status: 200 });
+
+  } catch (error) {
+    return new Response(JSON.stringify({
+      error: error.message,
+      detail: 'エラーが発生しました。'
+    }), { status: 500 });
+  }
+}
