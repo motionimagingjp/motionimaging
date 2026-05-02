@@ -101,30 +101,47 @@ function getHoliday(year, month, day) {
   return h[month + '-' + day] || null;
 }
 
-async function getWeather() {
+// 今日の6〜9時の天気をhourlyで取得
+async function getMorningWeather() {
   try {
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&forecast_days=1';
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&timezone=Asia%2FTokyo&forecast_days=1';
     const res = await fetch(url);
     const data = await res.json();
-    const code = data.daily.weathercode[0];
-    const max  = Math.round(data.daily.temperature_2m_max[0]);
+    const hours = data.hourly.time;
+    const codes = data.hourly.weathercode;
+    const temps = data.hourly.temperature_2m;
+
+    // 6〜9時のインデックスを取得
+    const morningIndices = hours
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => {
+        const h = new Date(t).getHours();
+        return h >= 6 && h <= 9;
+      })
+      .map(({ i }) => i);
+
+    // 最悪コードと最高気温を取得
+    const worstCode = Math.max(...morningIndices.map(i => codes[i]));
+    const maxTemp   = Math.max(...morningIndices.map(i => temps[i]));
+
     let weatherJA, weatherEN, penalty, scoreWeather;
-    if (code === 0)      { weatherJA = '快晴';     weatherEN = 'clear skies';     penalty = 0;  scoreWeather = 100; }
-    else if (code <= 2)  { weatherJA = '晴れ';     weatherEN = 'sunny';           penalty = 0;  scoreWeather = 90;  }
-    else if (code <= 3)  { weatherJA = '曇り';     weatherEN = 'cloudy';          penalty = 10; scoreWeather = 70;  }
-    else if (code <= 49) { weatherJA = '霧';       weatherEN = 'foggy';           penalty = 20; scoreWeather = 50;  }
-    else if (code <= 67) { weatherJA = '雨';       weatherEN = 'rainy';           penalty = 30; scoreWeather = 30;  }
-    else if (code <= 69) { weatherJA = '大雨';     weatherEN = 'heavy rain';      penalty = 40; scoreWeather = 20;  }
-    else if (code <= 79) { weatherJA = '雪';       weatherEN = 'snowy';           penalty = 40; scoreWeather = 20;  }
-    else if (code <= 84) { weatherJA = 'にわか雨'; weatherEN = 'passing showers'; penalty = 20; scoreWeather = 35;  }
-    else                 { weatherJA = '荒天';     weatherEN = 'stormy';          penalty = 50; scoreWeather = 10;  }
-    return { weatherJA, weatherEN, penalty, scoreWeather, max };
+    if (worstCode === 0)      { weatherJA = '快晴';     weatherEN = 'clear skies';     penalty = 0;  scoreWeather = 100; }
+    else if (worstCode <= 2)  { weatherJA = '晴れ';     weatherEN = 'sunny';           penalty = 0;  scoreWeather = 90;  }
+    else if (worstCode <= 3)  { weatherJA = '曇り';     weatherEN = 'cloudy';          penalty = 10; scoreWeather = 70;  }
+    else if (worstCode <= 49) { weatherJA = '霧';       weatherEN = 'foggy';           penalty = 20; scoreWeather = 50;  }
+    else if (worstCode <= 67) { weatherJA = '雨';       weatherEN = 'rainy';           penalty = 30; scoreWeather = 30;  }
+    else if (worstCode <= 69) { weatherJA = '大雨';     weatherEN = 'heavy rain';      penalty = 40; scoreWeather = 20;  }
+    else if (worstCode <= 79) { weatherJA = '雪';       weatherEN = 'snowy';           penalty = 40; scoreWeather = 20;  }
+    else if (worstCode <= 84) { weatherJA = 'にわか雨'; weatherEN = 'passing showers'; penalty = 20; scoreWeather = 35;  }
+    else                      { weatherJA = '荒天';     weatherEN = 'stormy';          penalty = 50; scoreWeather = 10;  }
+
+    return { weatherJA, weatherEN, penalty, scoreWeather, max: Math.round(maxTemp) };
   } catch {
     return { weatherJA: '晴れ', weatherEN: 'sunny', penalty: 0, scoreWeather: 90, max: '--' };
   }
 }
 
-async function callGemini(apiKey, prompt, maxTokens = 300) {
+async function callGemini(apiKey, prompt, maxTokens) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
@@ -133,7 +150,7 @@ async function callGemini(apiKey, prompt, maxTokens = 300) {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.8,
-        maxOutputTokens: maxTokens,
+        maxOutputTokens: maxTokens || 300,
         thinkingConfig: { thinkingBudget: 0 }
       }
     })
@@ -153,7 +170,7 @@ async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA,
   const prompt = '以下の条件で花スポット5件のミゴロン指数を算出してください。\n'
     + '条件：' + seasonInfo + '\n'
     + '日付：' + dateLabel + '\n'
-    + '今日の天気：' + weatherJA + '（最高' + max + '℃）\n'
+    + '今朝の天気：' + weatherJA + '（朝の最高' + max + '℃）\n'
     + '天気による指数補正：各スポットの指数から' + penalty + '%を差し引くこと。\n\n'
     + '必ず以下のJSON形式のみで返してください。マークダウン不要。\n'
     + '{"spots":[{"name":"ひたち海浜公園（茨城）","emoji":"🌼","score":65},{"name":"あしかがフラワーパーク（栃木）","emoji":"🌸","score":58},{"name":"昭和記念公園（東京）","emoji":"🌷","score":52},{"name":"国営武蔵丘陵森林公園（埼玉）","emoji":"🌿","score":45},{"name":"横浜公園（神奈川）","emoji":"🌺","score":38}],"memo":"今朝のコンディションを一言で"}';
@@ -196,7 +213,7 @@ async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN,
   const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
     + 'Date: ' + dateLabel + '\n'
     + 'Season: ' + seasonInfo + '\n'
-    + 'Weather today: ' + weatherEN + ' (max ' + max + 'C)\n'
+    + 'Weather this morning: ' + weatherEN + ' (morning max ' + max + 'C)\n'
     + 'Weather penalty: subtract ' + penalty + '% from each score.\n\n'
     + 'Return ONLY this JSON format, no markdown:\n'
     + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":65},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":58},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":52},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":45},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":38}],"memo":"One short sentence under 15 words"}';
@@ -218,7 +235,7 @@ async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN,
       { name: 'Musashino Forest Park, Saitama', emoji: '🌿', score: Math.max(10, 75 - penalty) },
       { name: 'Yokohama Park, Kanagawa', emoji: '🌺', score: Math.max(10, 68 - penalty) },
     ];
-    memo = weatherEN + ' conditions today.';
+    memo = weatherEN + ' conditions this morning.';
   }
 
   const ranked = spots.sort((a, b) => b.score - a.score);
@@ -284,18 +301,17 @@ export async function GET(request) {
   }
 
   try {
-    const API_KEY = process.env.GEMINI_API_KEY;
+    const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
     const dateLabelEN = getTodayLabelEN();
     const sakura      = isSakuraSeason();
     const flowers     = getSeasonalFlowers();
     const flowersEN   = getSeasonalFlowersEN();
-    const { weatherJA, weatherEN, penalty, scoreWeather, max } = await getWeather();
+    const { weatherJA, weatherEN, penalty, scoreWeather, max } = await getMorningWeather();
 
-    // 3つのツイートを生成
-    const tweetEN     = await buildFlowerTweetEN(API_KEY, dateLabelEN, sakura, flowersEN, weatherEN, penalty, max);
-    const tweetLucky  = await buildLuckyTweet(API_KEY, weatherJA, scoreWeather, max);
-    const tweetJA     = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weatherJA, penalty, max);
+    const tweetEN    = await buildFlowerTweetEN(API_KEY, dateLabelEN, sakura, flowersEN, weatherEN, penalty, max);
+    const tweetLucky = await buildLuckyTweet(API_KEY, weatherJA, scoreWeather, max);
+    const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weatherJA, penalty, max);
 
     const xClient = new TwitterApi({
       appKey:       process.env.X_API_KEY,
@@ -305,12 +321,10 @@ export async function GET(request) {
     });
 
     const results = {};
-
-    // 英語花→開運→日本語花の順に投稿（2秒間隔）
     for (const [key, text] of [
-      ['flower_en',    tweetEN],
-      ['lucky',        tweetLucky],
-      ['flower_ja',    tweetJA],
+      ['flower_en', tweetEN],
+      ['lucky',     tweetLucky],
+      ['flower_ja', tweetJA],
     ]) {
       try {
         await xClient.v2.tweet(text);
@@ -321,7 +335,7 @@ export async function GET(request) {
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    return new Response(JSON.stringify({ message: 'Success', results }), { status: 200 });
+    return new Response(JSON.stringify({ message: 'Success', results, weatherJA, penalty }), { status: 200 });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
