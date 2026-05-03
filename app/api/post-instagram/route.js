@@ -299,9 +299,9 @@ export async function GET(request) {
       postId,
     }), { status: 200 });
 
-  } catch (error) {
+ } catch (error) {
+    console.error('ERROR:', error.message, error.stack);
     return new Response(JSON.stringify({
       error: error.message,
     }), { status: 500 });
   }
-}
