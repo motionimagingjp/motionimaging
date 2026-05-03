@@ -29,10 +29,22 @@ async function callGemini(apiKey, prompt) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
-// 曜日を取得（JST）
+// JSTの日時を取得
+function getJST() {
+  return new Date(Date.now() + 9 * 3600000);
+}
+
+// 曜日を取得（0=日, 1=月...6=土）
 function getDayOfWeek() {
-  const jst = new Date(Date.now() + 9 * 3600000);
-  return jst.getDay(); // 0=日, 1=月, 2=火, 3=水, 4=木, 5=金, 6=土
+  return getJST().getDay();
+}
+
+// ISO週番号を取得（1年の第何週か）
+function getWeekNumber() {
+  const jst = getJST();
+  const startOfYear = new Date(jst.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((jst - startOfYear) / 86400000);
+  return Math.floor(dayOfYear / 7);
 }
 
 // アカウント識別子
@@ -50,15 +62,11 @@ const FOLDERS = {
   },
 };
 
-// 曜日ごとの設定（0=日曜は投稿なし）
-const DAY_CONFIG = {
-  1: { folder: 'miyakojima', theme: '宮古島' },
-  2: { folder: 'ishigaki',   theme: '石垣島・離島' },
-  3: { folder: 'miyakojima', theme: '宮古島' },
-  4: { folder: 'ishigaki',   theme: '石垣島・離島' },
-  5: { folder: 'miyakojima', theme: '宮古島' },
-  6: { folder: 'ishigaki',   theme: '石垣島・離島' },
-};
+// 今週どちらのフォルダを使うか（週番号の偶奇で切り替え）
+function getThisWeekFolder() {
+  const week = getWeekNumber();
+  return week % 2 === 0 ? 'miyakojima' : 'ishigaki';
+}
 
 // 次の画像インデックスを取得（Upstash Redisで管理）
 async function getNextImageIndex(folderKey, totalCount) {
@@ -80,8 +88,8 @@ function buildImageUrl(folderPath, index) {
 
 // Geminiでキャプション生成
 async function generateCaption(apiKey, theme) {
-  const today = new Date(Date.now() + 9 * 3600000);
-  const dateStr = `${today.getMonth() + 1}月${today.getDate()}日`;
+  const jst = getJST();
+  const dateStr = `${jst.getMonth() + 1}月${jst.getDate()}日`;
 
   const prompt = `あなたはInstagramの写真投稿のキャプションを書くプロです。
 今日（${dateStr}）の${theme}の絶景について、魅力的なキャプションを日本語で書いてください。
@@ -158,30 +166,28 @@ export async function GET(request) {
     return new Response(JSON.stringify({ message: '日曜日のため投稿をスキップ' }), { status: 200 });
   }
 
-  const config = DAY_CONFIG[dayOfWeek];
-  if (!config) {
-    return new Response(JSON.stringify({ message: '設定なし' }), { status: 200 });
-  }
-
   try {
-    const folder = FOLDERS[config.folder];
+    // 今週のフォルダを取得
+    const folderKey = getThisWeekFolder();
+    const folder = FOLDERS[folderKey];
+    const theme = folderKey === 'miyakojima' ? '宮古島' : '石垣島・離島';
 
     // 次の画像インデックス取得
-    const imageIndex = await getNextImageIndex(config.folder, folder.count);
+    const imageIndex = await getNextImageIndex(folderKey, folder.count);
 
     // 画像URL組み立て
     const imageUrl = buildImageUrl(folder.path, imageIndex);
 
     // キャプション生成
-    const caption = await generateCaption(process.env.GEMINI_API_KEY, config.theme);
+    const caption = await generateCaption(process.env.GEMINI_API_KEY, theme);
 
     // Instagram投稿
     const postId = await postToInstagram(imageUrl, caption);
 
     return new Response(JSON.stringify({
       message: 'Success',
-      day: dayOfWeek,
-      theme: config.theme,
+      week: getWeekNumber(),
+      theme,
       imageUrl,
       caption,
       postId,
