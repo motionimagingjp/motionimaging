@@ -17,7 +17,7 @@ async function callGemini(apiKey, prompt) {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.9,
-        maxOutputTokens: 600,
+        maxOutputTokens: 800,
         thinkingConfig: { thinkingBudget: 0 }
       }
     })
@@ -58,7 +58,6 @@ function getMonthDayString() {
   return `${jst.getMonth() + 1}月${jst.getDate()}日`;
 }
 
-// 天気コードを日本語に変換
 function weatherCodeToText(code) {
   if (code === 0) return '快晴';
   if (code <= 2) return '晴れ';
@@ -70,7 +69,6 @@ function weatherCodeToText(code) {
   return '荒天';
 }
 
-// 風速を表現に変換
 function windSpeedToText(speed) {
   if (speed < 3) return `微風（${speed}m/s）`;
   if (speed < 6) return `弱風（${speed}m/s）`;
@@ -79,7 +77,6 @@ function windSpeedToText(speed) {
   return `非常に強い風（${speed}m/s）`;
 }
 
-// 波高を表現に変換
 function waveHeightToText(height) {
   if (height < 0.5) return `穏やか（${height}m）`;
   if (height < 1.0) return `やや穏やか（${height}m）`;
@@ -88,39 +85,32 @@ function waveHeightToText(height) {
   return `荒れ気味（${height}m）`;
 }
 
-// 6:05時点のhourlyインデックスを取得
 function getCurrentHourIndex() {
-  const jst = getJST();
-  return jst.getHours(); // 6時 → index 6
+  return getJST().getHours();
 }
 
-// 天気情報を取得（hourlyで6時のデータ）
 async function getWeather(lat, lng) {
   try {
     const hourIndex = getCurrentHourIndex();
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=weathercode,temperature_2m,windspeed_10m&timezone=Asia%2FTokyo&forecast_days=1`;
     const res = await fetch(url);
     const data = await res.json();
-
     const code      = data.hourly.weathercode[hourIndex];
     const temp      = Math.round(data.hourly.temperature_2m[hourIndex]);
     const windSpeed = Math.round(data.hourly.windspeed_10m[hourIndex] * 10) / 10;
     const weather   = weatherCodeToText(code);
-
     return { weather, temp, windSpeed };
   } catch {
     return { weather: '晴れ', temp: 25, windSpeed: 4 };
   }
 }
 
-// 海況情報を取得（Marine API・hourlyで6時のデータ）
 async function getMarineInfo(lat, lng) {
   try {
     const hourIndex = getCurrentHourIndex();
     const url = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&hourly=wave_height&timezone=Asia%2FTokyo&forecast_days=1`;
     const res = await fetch(url);
     const data = await res.json();
-
     const waveHeight = Math.round(data.hourly.wave_height[hourIndex] * 10) / 10;
     return { waveHeight };
   } catch {
@@ -128,7 +118,6 @@ async function getMarineInfo(lat, lng) {
   }
 }
 
-// 潮汐情報（時間帯で簡易表現）
 function getTideInfo() {
   const hour = getJST().getHours();
   if (hour >= 5 && hour < 9) return '朝の上げ潮';
@@ -138,10 +127,8 @@ function getTideInfo() {
   return '夜の上げ潮';
 }
 
-// アカウント識別子
 const ACCOUNT = 'ig_motion_imaging';
 
-// フォルダ設定
 const FOLDERS = {
   miyakojima: {
     path: `${ACCOUNT}/miyakojima`,
@@ -184,7 +171,6 @@ function buildImageUrl(folderPath, index) {
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${folderPath}/${index}.jpg`;
 }
 
-// Geminiでキャプション生成
 async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
   const dateStr  = getDateString();
   const monthDay = getMonthDayString();
@@ -192,20 +178,15 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
   const { waveHeight } = marineInfo;
   const tide = getTideInfo();
 
-  const prompt = `あなたはInstagramのフォロワーを増やすプロのキャプションライターです。
-${folder.theme}の写真に合う、自然で魅力的なInstagramキャプションを日本語で書いてください。
+  // 天気・海況を文字列として先に組み立てる
+  const weatherBlock = `${monthDay}朝6時の${folder.locationJa}：${weather}、気温${temp}℃
+服装アドバイス：天気・気温に合った具体的なアドバイスを1文で書く`;
 
-【構成】
-1. 本文：場所の魅力やストーリーを自然な文体で（100文字程度）。わざとらしい書き出し不要。
-2. 天気情報（以下をそのまま使う）：
-${monthDay}朝6時の${folder.locationJa}：${weather}、気温${temp}℃
-服装アドバイス：天気・気温に合った具体的なアドバイスを1文で
-3. 海況リアルタイムレポート（以下をそのまま使う）：
-🌊 波の高さ：${waveHeightToText(waveHeight)}
+  const marineBlock = `🌊 波の高さ：${waveHeightToText(waveHeight)}
 💨 風の強さ：${windSpeedToText(windSpeed)}
-🌀 潮の状況：${tide}
-4. 固定フッター（以下をそのまま使う）：
-───────────
+🌀 潮の状況：${tide}`;
+
+  const footer = `───────────
 📸 Camera: Sony a7R5 / iPhone 17
 📍 ${folder.location}
 🗓 ${dateStr}
@@ -214,21 +195,33 @@ ${monthDay}朝6時の${folder.locationJa}：${weather}、気温${temp}℃
 サブ → @jake_images
 💾 保存して後で見返してね
 お仕事依頼はプロフィールから
-───────────
-5. ハッシュタグ：厳選5個のみ
+───────────`;
 
-条件：
-- 書き出しはわざとらしい疑問文や「え、〜」は使わない
-- 自然でリアルな文体
-- 毎回違う内容にすること
-- キャプション全体のみ返す（説明文不要）
+  const prompt = `以下のフォーマットに従って、Instagramのキャプションを完成させてください。
+【ルール】
+- [本文]の部分だけ新しく書く（100文字程度、${folder.theme}の魅力を自然な文体で）
+- わざとらしい疑問文や「え、〜」で始めない
+- 毎回違う内容にする
+- [天気情報][海況][フッター][ハッシュタグ]はそのまま出力する（変更禁止）
+- ハッシュタグは厳選5個のみ（増やさない）
+- 余計な説明文は不要、キャプション本文のみ返す
 
-キャプション：`;
+【出力フォーマット】
+[本文をここに書く]
+
+☀️ 今日の${folder.locationJa}情報
+${weatherBlock}
+
+🌊 海況リアルタイムレポート
+${marineBlock}
+
+${footer}
+
+#[タグ1] #[タグ2] #[タグ3] #[タグ4] #[タグ5]`;
 
   return await callGemini(apiKey, prompt);
 }
 
-// Instagram Graph APIで投稿
 async function postToInstagram(imageUrl, caption) {
   const igAccountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
   const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
@@ -284,23 +277,17 @@ export async function GET(request) {
     const folderKey = getThisWeekFolder();
     const folder = FOLDERS[folderKey];
 
-    // 天気・海況情報を並列取得
     const [weatherInfo, marineInfo] = await Promise.all([
       getWeather(folder.lat, folder.lng),
       getMarineInfo(folder.lat, folder.lng),
     ]);
 
-    // 次の画像インデックス取得
     const imageIndex = await getNextImageIndex(folderKey, folder.count);
-
-    // 画像URL組み立て
     const imageUrl = buildImageUrl(folder.path, imageIndex);
-
-    // キャプション生成
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo);
     console.error('CAPTION:', caption);
 
-    // Instagram投稿（テストモード）
+    // テストモード（本番時は下をコメント解除）
     const postId = 'TEST_MODE'; // await postToInstagram(imageUrl, caption);
 
     return new Response(JSON.stringify({
