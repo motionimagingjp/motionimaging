@@ -204,7 +204,7 @@ export async function GET(request) {
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder);
 
     // Instagram投稿
-    const postId = await postToInstagram(imageUrl, caption);
+const postId = 'TEST_MODE'; // await postToInstagram(imageUrl, caption);
 
     return new Response(JSON.stringify({
       message: 'Success',
