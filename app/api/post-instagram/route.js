@@ -17,7 +17,7 @@ async function callGemini(apiKey, prompt) {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.9,
-        maxOutputTokens: 300,
+        maxOutputTokens: 500,
         thinkingConfig: { thinkingBudget: 0 }
       }
     })
@@ -39,7 +39,7 @@ function getDayOfWeek() {
   return getJST().getDay();
 }
 
-// ISO週番号を取得（1年の第何週か）
+// ISO週番号を取得
 function getWeekNumber() {
   const jst = getJST();
   const startOfYear = new Date(jst.getFullYear(), 0, 1);
@@ -47,35 +47,48 @@ function getWeekNumber() {
   return Math.floor(dayOfYear / 7);
 }
 
+// 投稿日を整形（例：2026/05/04）
+function getDateString() {
+  const jst = getJST();
+  const y = jst.getFullYear();
+  const m = String(jst.getMonth() + 1).padStart(2, '0');
+  const d = String(jst.getDate()).padStart(2, '0');
+  return `${y}/${m}/${d}`;
+}
+
 // アカウント識別子
 const ACCOUNT = 'ig_motion_imaging';
 
-// フォルダと画像枚数の設定
+// フォルダ設定
 const FOLDERS = {
   miyakojima: {
     path: `${ACCOUNT}/miyakojima`,
     count: parseInt(process.env.MIYAKOJIMA_IMAGE_COUNT || '10'),
+    theme: '宮古島のビーチ',
+    location: 'Miyakojima Island, Okinawa Japan',
   },
   ishigaki: {
     path: `${ACCOUNT}/ishigaki`,
     count: parseInt(process.env.ISHIGAKI_IMAGE_COUNT || '7'),
+    theme: '石垣島・離島のビーチ',
+    location: 'Ishigaki & Remote Islands, Okinawa Japan',
   },
 };
 
-// 今週どちらのフォルダを使うか（週番号の偶奇で切り替え）
+// 今週のフォルダ（週番号の偶奇で切り替え）
 function getThisWeekFolder() {
   const week = getWeekNumber();
   return week % 2 === 0 ? 'miyakojima' : 'ishigaki';
 }
 
-// 次の画像インデックスを取得（Upstash Redisで管理）
+// 次の画像インデックスを取得
 async function getNextImageIndex(folderKey, totalCount) {
   const kvKey = `${ACCOUNT}_${folderKey}`;
   let current = await redis.get(kvKey);
   if (current === null || current === undefined) current = -1;
   const next = (parseInt(current) + 1) % totalCount;
   await redis.set(kvKey, next);
-  return next + 1; // 1始まり（1.jpg, 2.jpg...）
+  return next + 1;
 }
 
 // GitHub Raw URLを組み立て
@@ -87,21 +100,32 @@ function buildImageUrl(folderPath, index) {
 }
 
 // Geminiでキャプション生成
-async function generateCaption(apiKey, theme) {
-  const jst = getJST();
-  const dateStr = `${jst.getMonth() + 1}月${jst.getDate()}日`;
+async function generateCaption(apiKey, folder) {
+  const dateStr = getDateString();
 
-  const prompt = `あなたはInstagramの写真投稿のキャプションを書くプロです。
-今日（${dateStr}）の${theme}の絶景について、魅力的なキャプションを日本語で書いてください。
+  const prompt = `あなたはInstagramのフォロワーを増やすプロのキャプションライターです。
+${folder.theme}の写真に合う、魅力的なInstagramキャプションを日本語で書いてください。
+
+【構成】
+1. 冒頭1文：共感・疑問・驚きで読者を引き込む
+2. 本文：場所の魅力やストーリー（100文字程度）
+3. 固定フッター（以下をそのまま使う）：
+───────────
+📸 Camera: Sony a7R5 / iPhone 17
+📍 ${folder.location}
+🗓 ${dateStr}
+
+フォロー → @motion.imaging
+サブ → @jake_images
+💾 保存して後で見返してね
+お仕事依頼はプロフィールから
+───────────
+4. ハッシュタグ：関連する5〜8個
 
 条件：
-- 100文字程度（前後10文字はOK）
-- 旅行や写真撮影が好きな人に向けた内容
-- 具体的なスポット名や見どころを含める
-- 自然な口語体で親しみやすく
-- 末尾にハッシュタグを3〜5個（例：#宮古島 #絶景 #離島 #旅行 #写真好きな人と繋がりたい）
-- キャプション本文のみ返す（説明文不要）
+- 冒頭は必ず疑問・共感・驚きの一文で始める
 - 毎回違う内容にすること
+- キャプション全体のみ返す（説明文不要）
 
 キャプション：`;
 
@@ -167,10 +191,8 @@ export async function GET(request) {
   }
 
   try {
-    // 今週のフォルダを取得
     const folderKey = getThisWeekFolder();
     const folder = FOLDERS[folderKey];
-    const theme = folderKey === 'miyakojima' ? '宮古島' : '石垣島・離島';
 
     // 次の画像インデックス取得
     const imageIndex = await getNextImageIndex(folderKey, folder.count);
@@ -179,7 +201,7 @@ export async function GET(request) {
     const imageUrl = buildImageUrl(folder.path, imageIndex);
 
     // キャプション生成
-    const caption = await generateCaption(process.env.GEMINI_API_KEY, theme);
+    const caption = await generateCaption(process.env.GEMINI_API_KEY, folder);
 
     // Instagram投稿
     const postId = await postToInstagram(imageUrl, caption);
@@ -187,7 +209,7 @@ export async function GET(request) {
     return new Response(JSON.stringify({
       message: 'Success',
       week: getWeekNumber(),
-      theme,
+      theme: folder.theme,
       imageUrl,
       caption,
       postId,
