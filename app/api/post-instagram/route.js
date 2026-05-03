@@ -152,7 +152,7 @@ const FOLDERS = {
 
 function getThisWeekFolder() {
   const week = getWeekNumber();
- return week % 2 === 0 ? 'miyakojima' : 'ishigaki';
+ return week % 2 === 0 ? 'ishigaki' : 'miyakojima';
 }
 
 async function getNextImageIndex(folderKey, totalCount) {
