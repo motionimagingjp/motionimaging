@@ -168,7 +168,7 @@ function buildImageUrl(folderPath, index) {
   const owner  = process.env.GITHUB_REPO_OWNER;
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${folderPath}/${index}.jpg`;
+ return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${index}.jpg`;
 }
 
 async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
