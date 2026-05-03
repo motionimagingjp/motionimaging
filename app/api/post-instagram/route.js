@@ -152,7 +152,7 @@ const FOLDERS = {
 
 function getThisWeekFolder() {
   const week = getWeekNumber();
-  return 'miyakojima'; // テスト用固定
+ return week % 2 === 0 ? 'miyakojima' : 'ishigaki';
 }
 
 async function getNextImageIndex(folderKey, totalCount) {
@@ -287,8 +287,7 @@ export async function GET(request) {
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo);
     console.error('CAPTION:', caption);
 
-    // テストモード（本番時は下をコメント解除）
-    const postId = 'TEST_MODE'; // await postToInstagram(imageUrl, caption);
+     const postId = await postToInstagram(imageUrl, caption);
 
     return new Response(JSON.stringify({
       message: 'Success',
