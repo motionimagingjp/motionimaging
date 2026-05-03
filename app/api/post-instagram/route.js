@@ -202,7 +202,7 @@ export async function GET(request) {
 
     // キャプション生成
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder);
-　　　console.log('CAPTION:', caption);
+　　　console.error('CAPTION:', caption);
     
     // Instagram投稿
 const postId = 'TEST_MODE'; // await postToInstagram(imageUrl, caption);
