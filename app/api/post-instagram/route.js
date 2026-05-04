@@ -152,7 +152,7 @@ const FOLDERS = {
 
 function getThisWeekFolder() {
   const week = getWeekNumber();
- return week % 2 === 0 ? 'miyakojima' : 'ishigaki';
+ return week % 2 === 0 ? 'ishigaki' : 'miyakojima';
 }
 
 async function getNextImageIndex(folderKey, totalCount) {
@@ -168,7 +168,8 @@ function buildImageUrl(folderPath, index) {
   const owner  = process.env.GITHUB_REPO_OWNER;
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${folderPath}/${index}.jpg`;
+ const paddedIndex = String(index).padStart(2, '0');
+return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
 }
 
 async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
