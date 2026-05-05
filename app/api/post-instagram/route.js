@@ -311,11 +311,11 @@ export async function GET(request) {
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo);
 
     // Instagram投稿
-    const postId = await postToInstagram(imageUrl, caption);
+    const postId = "TEST_MODE"; // await postToInstagram(imageUrl, caption);
 
     // X投稿（Instagram成功後）
     const instagramUrl = buildInstagramUrl(postId);
-    await postToX(folder, instagramUrl);
+    console.error("X_TWEET:", `新しい写真を投稿しました📸 ${folder.locationJa} ${instagramUrl}`); // await postToX(folder, instagramUrl);
 
     return new Response(JSON.stringify({
       message: 'Success',
