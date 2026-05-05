@@ -1,10 +1,18 @@
 // app/api/post-instagram/route.js
 import { Redis } from '@upstash/redis';
+import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL,
   token: process.env.KV_REST_API_TOKEN,
+});
+
+const xClient = new TwitterApi({
+  appKey:       process.env.X_API_KEY,
+  appSecret:    process.env.X_API_SECRET,
+  accessToken:  process.env.X_ACCESS_TOKEN,
+  accessSecret: process.env.X_ACCESS_SECRET,
 });
 
 // Gemini呼び出し
@@ -141,7 +149,7 @@ const FOLDERS = {
   },
   ishigaki: {
     path: `${ACCOUNT}/ishigaki`,
-    count: parseInt(process.env.ISHIGAKI_IMAGE_COUNT || '7'),
+    count: parseInt(process.env.ISHIGAKI_IMAGE_COUNT || '12'),
     theme: '石垣島・離島のビーチ',
     location: 'Ishigaki & Remote Islands, Okinawa Japan',
     locationJa: '石垣島',
@@ -152,7 +160,7 @@ const FOLDERS = {
 
 function getThisWeekFolder() {
   const week = getWeekNumber();
- return week % 2 === 0 ? 'ishigaki' : 'miyakojima';
+  return week % 2 === 0 ? 'ishigaki' : 'miyakojima';
 }
 
 async function getNextImageIndex(folderKey, totalCount) {
@@ -168,8 +176,8 @@ function buildImageUrl(folderPath, index) {
   const owner  = process.env.GITHUB_REPO_OWNER;
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
- const paddedIndex = String(index).padStart(2, '0');
-return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
+  const paddedIndex = String(index).padStart(2, '0');
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
 }
 
 async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
@@ -179,7 +187,6 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
   const { waveHeight } = marineInfo;
   const tide = getTideInfo();
 
-  // 天気・海況を文字列として先に組み立てる
   const weatherBlock = `${monthDay}朝6時の${folder.locationJa}：${weather}、気温${temp}℃
 服装アドバイス：天気・気温に合った具体的なアドバイスを1文で書く`;
 
@@ -262,6 +269,22 @@ async function postToInstagram(imageUrl, caption) {
   return publishData.id;
 }
 
+// InstagramのポストIDからURLを生成
+function buildInstagramUrl(postId) {
+  return `https://www.instagram.com/p/${postId}/`;
+}
+
+// Xに投稿
+async function postToX(folder, instagramUrl) {
+  const tags = folder.locationJa === '宮古島'
+    ? '#宮古島 #ビーチ #絶景'
+    : '#石垣島 #離島 #ビーチ';
+
+  const tweet = `新しい写真を投稿しました📸✨\n${folder.locationJa}の絶景ビーチ、今日の海況もチェック🌊\n\n${instagramUrl}\n\n${tags}`;
+
+  await xClient.v2.tweet(tweet);
+}
+
 export async function GET(request) {
   const authHeader = request.headers.get('authorization');
   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
@@ -286,21 +309,24 @@ export async function GET(request) {
     const imageIndex = await getNextImageIndex(folderKey, folder.count);
     const imageUrl = buildImageUrl(folder.path, imageIndex);
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo);
-    console.error('CAPTION:', caption);
 
-     const postId = await postToInstagram(imageUrl, caption);
+    // Instagram投稿
+    const postId = "TEST_MODE"; // await postToInstagram(imageUrl, caption);
+
+    // X投稿（Instagram成功後）
+    const instagramUrl = buildInstagramUrl(postId);
+    console.error("X_TWEET:", `新しい写真を投稿しました📸 ${folder.locationJa} ${instagramUrl}`); // await postToX(folder, instagramUrl);
 
     return new Response(JSON.stringify({
       message: 'Success',
       theme: folder.theme,
-      weather: weatherInfo,
-      marine: marineInfo,
       imageUrl,
       caption,
-      postId,
+      instagramPostId: postId,
+      instagramUrl,
     }), { status: 200 });
 
- } catch (error) {
+  } catch (error) {
     console.error('ERROR:', error.message, error.stack);
     return new Response(JSON.stringify({
       error: error.message,
