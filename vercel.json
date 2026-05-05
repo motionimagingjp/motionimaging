@@ -1,9 +1,11 @@
-cat ~/Documents/GitHub/motionimaging/vercel.json
+cat > ~/Documents/GitHub/motionimaging/vercel.json << 'EOF'
 {
   "crons": [
     { "path": "/api/post-morning-all", "schedule": "3 21 * * *"  },
     { "path": "/api/post-evening",     "schedule": "5 9 * * *"   },
     { "path": "/api/post-daily",       "schedule": "15 12 * * *" },
-    { "path": "/api/post-instagram", "schedule": "5 21 * * *" }
+    { "path": "/api/post-instagram",   "schedule": "5 21 * * *"  },
+    { "path": "/api/post-jake-images", "schedule": "5 21 * * *"  }
   ]
 }
+EOF
