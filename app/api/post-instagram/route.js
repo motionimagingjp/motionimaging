@@ -58,7 +58,7 @@ function getDateString() {
   const y = jst.getFullYear();
   const m = String(jst.getMonth() + 1).padStart(2, '0');
   const d = String(jst.getDate()).padStart(2, '0');
-  return `${y}/${m}/${d}`;
+  return `${y}/${m}/${d}（過去画像）`;
 }
 
 function getMonthDayString() {
