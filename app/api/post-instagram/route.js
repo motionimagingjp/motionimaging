@@ -58,7 +58,7 @@ function getDateString() {
   const y = jst.getFullYear();
   const m = String(jst.getMonth() + 1).padStart(2, '0');
   const d = String(jst.getDate()).padStart(2, '0');
-  return `${y}/${m}/${d}（過去画像）`;
+  return `${y}/${m}/${d}`;
 }
 
 function getMonthDayString() {
@@ -269,12 +269,10 @@ async function postToInstagram(imageUrl, caption) {
   return publishData.id;
 }
 
-// InstagramのポストIDからURLを生成
 function buildInstagramUrl(postId) {
   return `https://www.instagram.com/p/${postId}/`;
 }
 
-// Xに投稿
 async function postToX(folder, instagramUrl) {
   const tags = folder.locationJa === '宮古島'
     ? '#宮古島 #ビーチ #絶景'
@@ -284,6 +282,120 @@ async function postToX(folder, instagramUrl) {
 
   await xClient.v2.tweet(tweet);
 }
+
+// ============================================================
+// @jake_images_ 投稿ブロック
+// ============================================================
+
+const JAKE_CSV_COLS = {
+  filename: 'FileName',
+  fstop:    'FNumber',
+  shutter:  'ExposureTime',
+  iso:      'ISO',
+  lens:     'LensModel',
+  location: 'location',
+};
+
+const JAKE_REDIS_KEY   = 'ig_jake_images_portrait';
+const JAKE_IMAGE_COUNT = parseInt(process.env.JAKE_IMAGE_COUNT || '20');
+const JAKE_FOLDER_PATH = 'ig_jake_images/portrait';
+
+async function fetchJakeExifCSV() {
+  const owner  = process.env.GITHUB_REPO_OWNER;
+  const repo   = process.env.GITHUB_REPO_NAME;
+  const branch = process.env.GITHUB_BRANCH || 'main';
+  const url    = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${JAKE_FOLDER_PATH}/exif.csv`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`CSV fetch failed: ${res.status}`);
+  return parseCSV(await res.text());
+}
+
+function parseCSV(text) {
+  const lines   = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  return lines.slice(1).map(line => {
+    const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+    return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? '']));
+  });
+}
+
+async function postJakeImages() {
+  // 1. 次のインデックス取得
+  let current = await redis.get(JAKE_REDIS_KEY);
+  if (current === null || current === undefined) current = -1;
+  const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
+  const imageNum  = String(nextIndex + 1).padStart(2, '0');
+
+  // 2. 画像URL
+  const imageUrl = buildImageUrl(JAKE_FOLDER_PATH, nextIndex + 1);
+
+  // 3. CSV から EXIF 取得
+  const rows  = await fetchJakeExifCSV();
+  const exif  = rows.find(r => (r[JAKE_CSV_COLS.filename] || '') === `${imageNum}.jpg`) || {};
+  const fstop   = exif[JAKE_CSV_COLS.fstop]   || '?';
+  const shutter = exif[JAKE_CSV_COLS.shutter] || '?';
+  const iso     = exif[JAKE_CSV_COLS.iso]      || '?';
+  const lens    = exif[JAKE_CSV_COLS.lens]     || '';
+  const loc     = exif[JAKE_CSV_COLS.location] || 'Japan';
+
+  // 4. Gemini でキャプション生成
+  const dateStr = getDateString();
+  const prompt  = `あなたはプロのポートレートフォトグラファーです。
+以下のフォーマットで日本語のInstagramキャプションを生成してください。
+
+【ルール】
+- 1行目：エモーショナルな一行（詩的・余白のある表現、20〜35文字、句読点なし）
+- 毎回違う内容にする
+- 余計な説明不要、キャプション本文のみ返す
+
+【出力フォーマット】
+[エモーショナルな一行]
+
+📷 Sony a7R5
+🔭 f/${fstop}  ${shutter}s  ISO${iso}${lens ? `\n🎯 ${lens}` : ''}
+👤 Model: TBA
+
+📍 ${loc}
+🗓 ${dateStr}
+フォロー → @jake_images_
+サブ → @motion.imaging
+お仕事はプロフィールから
+
+#ポートレート #portrait #portraitphotography #日本 #ソニー`;
+
+  const caption = await callGemini(process.env.GEMINI_API_KEY, prompt);
+
+  // 5. Instagram 投稿
+  const igId    = process.env.JAKE_IMAGES_ACCOUNT_ID;
+  const igToken = process.env.JAKE_IMAGES_ACCESS_TOKEN;
+
+  const cRes = await fetch(`https://graph.instagram.com/v19.0/${igId}/media`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_url: imageUrl, caption, access_token: igToken })
+  });
+  const cData = await cRes.json();
+  if (cData.error) throw new Error('Jake Container Error: ' + cData.error.message);
+
+  await new Promise(r => setTimeout(r, 3000));
+
+  const pRes = await fetch(`https://graph.instagram.com/v19.0/${igId}/media_publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creation_id: cData.id, access_token: igToken })
+  });
+  const pData = await pRes.json();
+  if (pData.error) throw new Error('Jake Publish Error: ' + pData.error.message);
+
+  // 6. Redis 更新
+  await redis.set(JAKE_REDIS_KEY, nextIndex);
+
+  return { success: true, imageNumber: imageNum, postId: pData.id, caption };
+}
+
+// ============================================================
+// メインハンドラー
+// ============================================================
 
 export async function GET(request) {
   const authHeader = request.headers.get('authorization');
@@ -298,6 +410,7 @@ export async function GET(request) {
   }
 
   try {
+    // --- @motion.imaging ---
     const folderKey = getThisWeekFolder();
     const folder = FOLDERS[folderKey];
 
@@ -310,12 +423,18 @@ export async function GET(request) {
     const imageUrl = buildImageUrl(folder.path, imageIndex);
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo);
 
-    // Instagram投稿
     const postId = "TEST_MODE"; // await postToInstagram(imageUrl, caption);
-
-    // X投稿（Instagram成功後）
     const instagramUrl = buildInstagramUrl(postId);
     console.error("X_TWEET:", `新しい写真を投稿しました📸 ${folder.locationJa} ${instagramUrl}`); // await postToX(folder, instagramUrl);
+
+    // --- @jake_images_ ---
+    let jakeResult = null;
+    try {
+      jakeResult = await postJakeImages();
+      console.log('✅ jake_images_ posted:', jakeResult?.imageNumber);
+    } catch (err) {
+      console.error('❌ jake_images_ failed:', err.message);
+    }
 
     return new Response(JSON.stringify({
       message: 'Success',
@@ -324,6 +443,7 @@ export async function GET(request) {
       caption,
       instagramPostId: postId,
       instagramUrl,
+      jakeImages: jakeResult,
     }), { status: 200 });
 
   } catch (error) {
