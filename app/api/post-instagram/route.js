@@ -36,6 +36,44 @@ async function callGemini(apiKey, prompt) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
+async function callGeminiWithImage(apiKey, imageBase64, textPrompt) {
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
+          { text: textPrompt }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 50,
+        thinkingConfig: { thinkingBudget: 0 }
+      }
+    })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error('Gemini Vision Error: ' + data.error.message);
+  const parts = data.candidates[0].content.parts;
+  const textPart = parts.find(p => p.text && !p.thought);
+  return (textPart ? textPart.text : parts[parts.length - 1].text).trim().toLowerCase();
+}
+
+async function imageUrlToBase64(imageUrl) {
+  const res = await fetch(imageUrl);
+  if (!res.ok) throw new Error(`Image fetch failed: ${res.status}`);
+  const buffer = await res.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
 function getJST() {
   return new Date(Date.now() + 9 * 3600000);
 }
@@ -133,6 +171,53 @@ function getTideInfo() {
   return '夜の上げ潮';
 }
 
+function getMotionThemeInfo(theme, locationJa) {
+  const info = {
+    beach: {
+      '宮古島': '🏖 宮古島ビーチ情報：与那覇前浜は日本屈指の透明度。新城海岸では運が良ければウミガメと泳げる。砂山ビーチは砂丘を越えた先にある隠れ名所。',
+      '石垣島': '🏖 石垣島ビーチ情報：川平湾はエメラルドグリーンの海が美しい国名勝。米原ビーチはサンゴ礁豊富でシュノーケル最適。底地ビーチは遠浅で家族向け。',
+    },
+    star: {
+      '宮古島': '🌟 宮古島星空情報：宮古島は日本有数の星空スポット。島の言い伝えでは流れ星に願うと叶うとされる。新月前後の夜が最も美しく天の川が見える。',
+      '石垣島': '🌟 石垣島星空情報：石垣島は国内最大の星空保護区。八重山の言い伝えでは天の川は海への道とされている。石垣天文台では南十字星も観測できる。',
+    },
+    diving: {
+      '宮古島': '🤿 宮古島ダイビング情報：ヤビジは宮古最大の珊瑚礁。大神島周辺では青珊瑚の群生が見られる。通り池は地底とつながる神秘的なダイビングスポット。',
+      '石垣島': '🤿 石垣島ダイビング情報：マンタスクランブルはマンタと確実に出会えるスポットとして世界的に有名。川平湾周辺はビギナーにも人気の珊瑚礁。',
+    },
+    flower_buffalo: {
+      '宮古島': '🌺 宮古島自然情報：3〜4月は日本最大の蝶・オオゴマダラが舞う季節。ハイビスカスやブーゲンビリアが一年中咲き誇る南国の楽園。',
+      '石垣島': '🐃 石垣島文化情報：竹富島では水牛車で島をのんびり巡れる。サキシマスオウノキなど亜熱帯植物が生い茂るジャングルも必見。',
+    },
+    sunset: {
+      '宮古島': '🌅 宮古島サンセット情報：西平安名崎は宮古島随一の夕日スポット。池間大橋からのサンセットも絶景。海が黄金色に染まる瞬間は息をのむ美しさ。',
+      '石垣島': '🌅 石垣島サンセット情報：川平湾のサンセットは格別の美しさ。バンナ岳展望台からは島全体が夕日に染まる絶景を楽しめる。',
+    },
+    other: {
+      '宮古島': '🌊 宮古島の魅力：エメラルドグリーンの海と白い砂浜、温かい島人の笑顔。一度訪れたら必ずまた来たくなる島。',
+      '石垣島': '🌊 石垣島の魅力：八重山諸島の玄関口として多くの離島へのアクセス拠点。独自の文化と自然が共存する豊かな島。',
+    },
+  };
+  const themeKey = Object.keys(info).find(k => theme.includes(k)) || 'other';
+  return info[themeKey][locationJa] || info['other'][locationJa];
+}
+
+function getJakeThemeInfo(theme) {
+  const info = {
+    sakura: '🌸 桜とポートレート：日本の春の象徴・桜と人物の組み合わせは儚さと美しさが重なる特別な瞬間。満開の桜の下での撮影は一期一会。',
+    kimono: '👘 着物ポートレート：日本の伝統美を纏った姿は街並みと溶け合うとき特別な空気が生まれる。和の美しさを次世代へ。',
+    beach:  '🏖 ビーチポートレート：沖縄の透き通る海と人物の組み合わせ。太陽の光が肌を照らし風が髪をなびかせる自然体の美しさ。',
+    star:   '🌟 星空ポートレート：満天の星空の下でのポートレートは宇宙と人間の対比が生む圧倒的なスケール感。沖縄の澄んだ夜空だからこそ撮れる一枚。',
+    flower: '🌺 フラワーポートレート：南国の花々に囲まれた美しさ。ブーゲンビリアやハイビスカスの鮮やかな色彩が人物の魅力を引き立てる。',
+    street: '🏙 ストリートポートレート：街の空気と人物が混ざり合う瞬間を切り取る。日常の中に潜む美しさを探して。',
+    school: '🎒 学生ポートレート：あどけなさの中に宿る目の奥の輝き。その瞬間にしかない純粋さと可能性を、ファインダー越しに切り取った一枚。ぜひ目を見てほしい。',
+    studio: '📸 スタジオポートレート：光を完全にコントロールした環境で引き出すその人だけの表情と個性。',
+    other:  '📷 ポートレートの魅力：その人だけが持つ表情、空気感、存在感。カメラを通して引き出す瞬間の美しさ。',
+  };
+  const themeKey = Object.keys(info).find(k => theme.includes(k)) || 'other';
+  return info[themeKey];
+}
+
 const ACCOUNT = 'ig_motion_imaging';
 
 const FOLDERS = {
@@ -178,12 +263,27 @@ function buildImageUrl(folderPath, index) {
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
 }
 
-async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
+async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl) {
   const dateStr  = getDateString();
   const monthDay = getMonthDayString();
   const { weather, temp, windSpeed } = weatherInfo;
   const { waveHeight } = marineInfo;
   const tide = getTideInfo();
+
+  // 画像をbase64に変換してGeminiでテーマ判別
+  let themeInfo = getMotionThemeInfo('other', folder.locationJa);
+  try {
+    const base64 = await imageUrlToBase64(imageUrl);
+    const theme = await callGeminiWithImage(
+      apiKey,
+      base64,
+      `これは${folder.locationJa}で撮影された写真です。以下の選択肢から最も当てはまるテーマを1つだけ答えてください。選択肢以外の言葉は不要です。\n選択肢: beach, star, diving, flower_buffalo, sunset, other`
+    );
+    console.log('🎨 Motion theme:', theme);
+    themeInfo = getMotionThemeInfo(theme, folder.locationJa);
+  } catch (e) {
+    console.error('Theme detection failed:', e.message);
+  }
 
   const weatherBlock = `${monthDay}朝6時の${folder.locationJa}：${weather}、気温${temp}℃
 服装アドバイス：天気・気温に合った具体的なアドバイスを1文で書く`;
@@ -195,7 +295,7 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
   const footer = `───────────
 📸 Camera: Sony a7R5 / iPhone 17
 📍 ${folder.location}
-🗓 ${dateStr}
+🗓 ${dateStr}（投稿日、過去画像）
 
 フォロー → @motion.imaging
 サブ → @jake_images
@@ -208,7 +308,7 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo) {
 - [本文]の部分だけ新しく書く（100文字程度、${folder.theme}の魅力を自然な文体で）
 - わざとらしい疑問文や「え、〜」で始めない
 - 毎回違う内容にする
-- [天気情報][海況][フッター][ハッシュタグ]はそのまま出力する（変更禁止）
+- [天気情報][海況][テーマ情報][フッター][ハッシュタグ]はそのまま出力する（変更禁止）
 - ハッシュタグは厳選5個のみ（増やさない）
 - 余計な説明文は不要、キャプション本文のみ返す
 
@@ -220,6 +320,8 @@ ${weatherBlock}
 
 🌊 海況リアルタイムレポート
 ${marineBlock}
+
+📌 ${themeInfo}
 
 ${footer}
 
@@ -237,11 +339,7 @@ async function postToInstagram(imageUrl, caption) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image_url: imageUrl,
-        caption: caption,
-        access_token: accessToken,
-      }),
+      body: JSON.stringify({ image_url: imageUrl, caption, access_token: accessToken }),
     }
   );
   const containerData = await containerRes.json();
@@ -255,10 +353,7 @@ async function postToInstagram(imageUrl, caption) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        creation_id: containerId,
-        access_token: accessToken,
-      }),
+      body: JSON.stringify({ creation_id: containerId, access_token: accessToken }),
     }
   );
   const publishData = await publishRes.json();
@@ -275,9 +370,7 @@ async function postToX(folder, instagramUrl) {
   const tags = folder.locationJa === '宮古島'
     ? '#宮古島 #ビーチ #絶景'
     : '#石垣島 #離島 #ビーチ';
-
   const tweet = `新しい写真を投稿しました📸✨\n${folder.locationJa}の絶景ビーチ、今日の海況もチェック🌊\n\n${instagramUrl}\n\n${tags}`;
-
   await xClient.v2.tweet(tweet);
 }
 
@@ -318,13 +411,16 @@ function parseCSV(text) {
 }
 
 async function postJakeImages() {
+  // 1. 次のインデックス取得
   let current = await redis.get(JAKE_REDIS_KEY);
   if (current === null || current === undefined) current = -1;
   const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
   const imageNum  = String(nextIndex + 1).padStart(2, '0');
 
+  // 2. 画像URL
   const imageUrl = buildImageUrl(JAKE_FOLDER_PATH, nextIndex + 1);
 
+  // 3. CSV から EXIF 取得
   const rows  = await fetchJakeExifCSV();
   const exif  = rows.find(r => (r[JAKE_CSV_COLS.filename] || '') === `${imageNum}.jpg`) || {};
   const fstop   = exif[JAKE_CSV_COLS.fstop]   || '?';
@@ -332,6 +428,21 @@ async function postJakeImages() {
   const iso     = exif[JAKE_CSV_COLS.iso]      || '?';
   const lens    = exif[JAKE_CSV_COLS.lens]     || '';
   const loc     = exif[JAKE_CSV_COLS.location] || 'Japan';
+
+  // 4. 画像を見てテーマ判別 + キャプション生成
+  let jakeThemeInfo = getJakeThemeInfo('other');
+  try {
+    const base64 = await imageUrlToBase64(imageUrl);
+    const theme = await callGeminiWithImage(
+      process.env.GEMINI_API_KEY,
+      base64,
+      'これはポートレート写真です。以下の選択肢から最も当てはまるテーマを1つだけ答えてください。選択肢以外の言葉は不要です。\n選択肢: sakura, kimono, beach, star, flower, street, school, studio, other'
+    );
+    console.log('🎨 Jake theme:', theme);
+    jakeThemeInfo = getJakeThemeInfo(theme);
+  } catch (e) {
+    console.error('Jake theme detection failed:', e.message);
+  }
 
   const dateStr = getDateString();
   const prompt  = `あなたはプロのポートレートフォトグラファーです。
@@ -349,8 +460,10 @@ async function postJakeImages() {
 🔭 f/${fstop}  ${shutter}s  ISO${iso}${lens ? `\n🎯 ${lens}` : ''}
 👤 Model: TBA
 
+📌 ${jakeThemeInfo}
+
 📍 ${loc}
-🗓 ${dateStr}
+🗓 ${dateStr}（投稿日、過去画像）
 フォロー → @jake_images_
 サブ → @motion.imaging
 お仕事はプロフィールから
@@ -359,6 +472,7 @@ async function postJakeImages() {
 
   const caption = await callGemini(process.env.GEMINI_API_KEY, prompt);
 
+  // 5. Instagram 投稿
   const igId    = process.env.JAKE_IMAGES_ACCOUNT_ID;
   const igToken = process.env.JAKE_IMAGES_ACCESS_TOKEN;
 
@@ -380,6 +494,7 @@ async function postJakeImages() {
   const pData = await pRes.json();
   if (pData.error) throw new Error('Jake Publish Error: ' + pData.error.message);
 
+  // 6. Redis 更新
   await redis.set(JAKE_REDIS_KEY, nextIndex);
 
   return { success: true, imageNumber: imageNum, postId: pData.id, caption };
@@ -407,7 +522,7 @@ export async function GET(request) {
 
     const imageIndex = await getNextImageIndex(folderKey, folder.count);
     const imageUrl = buildImageUrl(folder.path, imageIndex);
-    const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo);
+    const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo, imageUrl);
 
     const postId = await postToInstagram(imageUrl, caption);
     const instagramUrl = buildInstagramUrl(postId);
@@ -434,8 +549,6 @@ export async function GET(request) {
 
   } catch (error) {
     console.error('ERROR:', error.message, error.stack);
-    return new Response(JSON.stringify({
-      error: error.message,
-    }), { status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 }
