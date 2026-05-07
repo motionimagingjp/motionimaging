@@ -395,12 +395,6 @@ export async function GET(request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const dayOfWeek = getDayOfWeek();
-
-  if (dayOfWeek === 0) {
-    return new Response(JSON.stringify({ message: '日曜日のため投稿をスキップ' }), { status: 200 });
-  }
-
   try {
     // --- @motion.imaging ---
     const folderKey = getThisWeekFolder();
