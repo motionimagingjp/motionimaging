@@ -210,6 +210,7 @@ function getJakeThemeInfo(theme) {
     star:   '🌟 星空ポートレート：満天の星空の下でのポートレートは宇宙と人間の対比が生む圧倒的なスケール感。沖縄の澄んだ夜空だからこそ撮れる一枚。',
     flower: '🌺 フラワーポートレート：南国の花々に囲まれた美しさ。ブーゲンビリアやハイビスカスの鮮やかな色彩が人物の魅力を引き立てる。',
     street: '🏙 ストリートポートレート：街の空気と人物が混ざり合う瞬間を切り取る。日常の中に潜む美しさを探して。',
+    school: '🎒 学生ポートレート：あどけなさの中に宿る目の奥の輝き。その瞬間にしかない純粋さと可能性を、ファインダー越しに切り取った一枚。ぜひ目を見てほしい。',
     studio: '📸 スタジオポートレート：光を完全にコントロールした環境で引き出すその人だけの表情と個性。',
     other:  '📷 ポートレートの魅力：その人だけが持つ表情、空気感、存在感。カメラを通して引き出す瞬間の美しさ。',
   };
@@ -435,7 +436,7 @@ async function postJakeImages() {
     const theme = await callGeminiWithImage(
       process.env.GEMINI_API_KEY,
       base64,
-      'これはポートレート写真です。以下の選択肢から最も当てはまるテーマを1つだけ答えてください。選択肢以外の言葉は不要です。\n選択肢: sakura, kimono, beach, star, flower, street, studio, other'
+      'これはポートレート写真です。以下の選択肢から最も当てはまるテーマを1つだけ答えてください。選択肢以外の言葉は不要です。\n選択肢: sakura, kimono, beach, star, flower, street, school, studio, other'
     );
     console.log('🎨 Jake theme:', theme);
     jakeThemeInfo = getJakeThemeInfo(theme);
