@@ -15,7 +15,6 @@ const xClient = new TwitterApi({
   accessSecret: process.env.X_ACCESS_SECRET,
 });
 
-// Gemini呼び出し
 async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
@@ -37,7 +36,6 @@ async function callGemini(apiKey, prompt) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
-// JSTの日時を取得
 function getJST() {
   return new Date(Date.now() + 9 * 3600000);
 }
@@ -320,16 +318,13 @@ function parseCSV(text) {
 }
 
 async function postJakeImages() {
-  // 1. 次のインデックス取得
   let current = await redis.get(JAKE_REDIS_KEY);
   if (current === null || current === undefined) current = -1;
   const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
   const imageNum  = String(nextIndex + 1).padStart(2, '0');
 
-  // 2. 画像URL
   const imageUrl = buildImageUrl(JAKE_FOLDER_PATH, nextIndex + 1);
 
-  // 3. CSV から EXIF 取得
   const rows  = await fetchJakeExifCSV();
   const exif  = rows.find(r => (r[JAKE_CSV_COLS.filename] || '') === `${imageNum}.jpg`) || {};
   const fstop   = exif[JAKE_CSV_COLS.fstop]   || '?';
@@ -338,7 +333,6 @@ async function postJakeImages() {
   const lens    = exif[JAKE_CSV_COLS.lens]     || '';
   const loc     = exif[JAKE_CSV_COLS.location] || 'Japan';
 
-  // 4. Gemini でキャプション生成
   const dateStr = getDateString();
   const prompt  = `あなたはプロのポートレートフォトグラファーです。
 以下のフォーマットで日本語のInstagramキャプションを生成してください。
@@ -365,7 +359,6 @@ async function postJakeImages() {
 
   const caption = await callGemini(process.env.GEMINI_API_KEY, prompt);
 
-  // 5. Instagram 投稿
   const igId    = process.env.JAKE_IMAGES_ACCOUNT_ID;
   const igToken = process.env.JAKE_IMAGES_ACCESS_TOKEN;
 
@@ -387,7 +380,6 @@ async function postJakeImages() {
   const pData = await pRes.json();
   if (pData.error) throw new Error('Jake Publish Error: ' + pData.error.message);
 
-  // 6. Redis 更新
   await redis.set(JAKE_REDIS_KEY, nextIndex);
 
   return { success: true, imageNumber: imageNum, postId: pData.id, caption };
@@ -423,9 +415,9 @@ export async function GET(request) {
     const imageUrl = buildImageUrl(folder.path, imageIndex);
     const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo);
 
-    const postId = "TEST_MODE"; // await postToInstagram(imageUrl, caption);
+    const postId = await postToInstagram(imageUrl, caption);
     const instagramUrl = buildInstagramUrl(postId);
-    console.error("X_TWEET:", `新しい写真を投稿しました📸 ${folder.locationJa} ${instagramUrl}`); // await postToX(folder, instagramUrl);
+    await postToX(folder, instagramUrl);
 
     // --- @jake_images_ ---
     let jakeResult = null;
