@@ -15,6 +15,16 @@ const xClient = new TwitterApi({
   accessSecret: process.env.X_ACCESS_SECRET,
 });
 
+const FIXED_COMMENT = `いつもご覧いただきありがとうございます。
+写真はすべて私自身が撮影したものですが、投稿文の最適化や気象データの解析には生成AIを活用しています。AIの進化に圧倒され、一時期は撮影を離れたこともありましたが、現在は「リアルな一瞬」と「AI」を融合させた表現を追求しています。
+【My Challenge & Life】 アラフィフからの新たな挑戦として、AI活用やアプリ開発をゆっくりですが心から楽しんでいます。いくつになっても新しいことを学ぶ楽しさを、発信を通じて共有できれば嬉しいです。
+【Social Media & Projects】
+* Landscape: @motion.imaging (海・風景)
+* Portrait: @jake_images_ (撮影条件も公開中)
+* X (Twitter): @motion_imaging ↳ 毎朝6時に「花・富士山・雲海・星空」のミゴロン指数を独自計算して発信中！
+* Development: 現在、新しいコミュニケーションツールを開発中です。
+自動生成の予報データに不具合があれば、優しく教えていただけると助かります（笑）。コメントやフォロー、お気軽にどうぞ！`;
+
 async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
@@ -285,10 +295,8 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl
   const { waveHeight } = marineInfo;
   const tide = getTideInfo();
 
-  // 東京の天気取得
   const tokyoWeather = await getTokyoWeather();
 
-  // 画像をbase64に変換してGeminiでテーマ判別
   let themeInfo = getMotionThemeInfo('other', folder.locationJa);
   try {
     const base64 = await imageUrlToBase64(imageUrl);
@@ -303,7 +311,6 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl
     console.error('Theme detection failed:', e.message);
   }
 
-  // サブエリア情報
   const subLocationJa = folder.locationJa === '宮古島' ? '石垣島' : '宮古島';
   const subWeatherBlock = `☀️ ${subLocationJa}の天気：${subWeatherInfo.weather}、気温${subWeatherInfo.temp}℃`;
 
@@ -350,6 +357,8 @@ ${marineBlock}
 ${footer}
 
 ${subWeatherBlock}
+
+${FIXED_COMMENT}
 
 #[タグ1] #[タグ2] #[タグ3] #[タグ4] #[タグ5]`;
 
@@ -437,16 +446,13 @@ function parseCSV(text) {
 }
 
 async function postJakeImages() {
-  // 1. 次のインデックス取得
   let current = await redis.get(JAKE_REDIS_KEY);
   if (current === null || current === undefined) current = -1;
   const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
   const imageNum  = String(nextIndex + 1).padStart(2, '0');
 
-  // 2. 画像URL
   const imageUrl = buildImageUrl(JAKE_FOLDER_PATH, nextIndex + 1);
 
-  // 3. CSV から EXIF 取得
   const rows  = await fetchJakeExifCSV();
   const exif  = rows.find(r => (r[JAKE_CSV_COLS.filename] || '') === `${imageNum}.jpg`) || {};
   const fstop   = exif[JAKE_CSV_COLS.fstop]   || '?';
@@ -455,7 +461,6 @@ async function postJakeImages() {
   const lens    = exif[JAKE_CSV_COLS.lens]     || '';
   const loc     = exif[JAKE_CSV_COLS.location] || 'Japan';
 
-  // 4. 画像を見てテーマ判別 + キャプション生成
   let jakeThemeInfo = getJakeThemeInfo('other');
   try {
     const base64 = await imageUrlToBase64(imageUrl);
@@ -494,11 +499,12 @@ async function postJakeImages() {
 サブ → @motion.imaging
 お仕事はプロフィールから
 
+${FIXED_COMMENT}
+
 #ポートレート #portrait #portraitphotography #日本 #ソニー`;
 
   const caption = await callGemini(process.env.GEMINI_API_KEY, prompt);
 
-  // 5. Instagram 投稿
   const igId    = process.env.JAKE_IMAGES_ACCOUNT_ID;
   const igToken = process.env.JAKE_IMAGES_ACCESS_TOKEN;
 
@@ -520,7 +526,6 @@ async function postJakeImages() {
   const pData = await pRes.json();
   if (pData.error) throw new Error('Jake Publish Error: ' + pData.error.message);
 
-  // 6. Redis 更新
   await redis.set(JAKE_REDIS_KEY, nextIndex);
 
   return { success: true, imageNumber: imageNum, postId: pData.id, caption };
@@ -537,7 +542,6 @@ export async function GET(request) {
   }
 
   try {
-    // --- @motion.imaging ---
     const folderKey = getThisWeekFolder();
     const folder = FOLDERS[folderKey];
     const subFolderKey = folderKey === 'miyakojima' ? 'ishigaki' : 'miyakojima';
@@ -557,7 +561,6 @@ export async function GET(request) {
     const instagramUrl = buildInstagramUrl(postId);
     await postToX(folder, instagramUrl);
 
-    // --- @jake_images_ ---
     let jakeResult = null;
     try {
       jakeResult = await postJakeImages();
