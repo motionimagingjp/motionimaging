@@ -149,6 +149,21 @@ async function getWeather(lat, lng) {
   }
 }
 
+async function getTokyoWeather() {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&daily=temperature_2m_max&timezone=Asia%2FTokyo&forecast_days=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const hourIndex = getCurrentHourIndex();
+    const code    = data.hourly.weathercode[hourIndex];
+    const maxTemp = Math.round(data.daily.temperature_2m_max[0]);
+    const weather = weatherCodeToText(code);
+    return { weather, maxTemp };
+  } catch {
+    return { weather: '晴れ', maxTemp: 25 };
+  }
+}
+
 async function getMarineInfo(lat, lng) {
   try {
     const hourIndex = getCurrentHourIndex();
@@ -263,12 +278,15 @@ function buildImageUrl(folderPath, index) {
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
 }
 
-async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl) {
+async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl, subWeatherInfo) {
   const dateStr  = getDateString();
   const monthDay = getMonthDayString();
   const { weather, temp, windSpeed } = weatherInfo;
   const { waveHeight } = marineInfo;
   const tide = getTideInfo();
+
+  // 東京の天気取得
+  const tokyoWeather = await getTokyoWeather();
 
   // 画像をbase64に変換してGeminiでテーマ判別
   let themeInfo = getMotionThemeInfo('other', folder.locationJa);
@@ -284,6 +302,10 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl
   } catch (e) {
     console.error('Theme detection failed:', e.message);
   }
+
+  // サブエリア情報
+  const subLocationJa = folder.locationJa === '宮古島' ? '石垣島' : '宮古島';
+  const subWeatherBlock = `☀️ ${subLocationJa}の天気：${subWeatherInfo.weather}、気温${subWeatherInfo.temp}℃`;
 
   const weatherBlock = `${monthDay}朝6時の${folder.locationJa}：${weather}、気温${temp}℃
 服装アドバイス：天気・気温に合った具体的なアドバイスを1文で書く`;
@@ -308,12 +330,12 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl
 - [本文]の部分だけ新しく書く（100文字程度、${folder.theme}の魅力を自然な文体で）
 - わざとらしい疑問文や「え、〜」で始めない
 - 毎回違う内容にする
-- [天気情報][海況][テーマ情報][フッター][ハッシュタグ]はそのまま出力する（変更禁止）
+- [本文]以外はそのまま出力する（変更禁止）
 - ハッシュタグは厳選5個のみ（増やさない）
 - 余計な説明文は不要、キャプション本文のみ返す
 
 【出力フォーマット】
-[本文をここに書く]
+おはようございます。今日の東京は${tokyoWeather.weather}、最高気温${tokyoWeather.maxTemp}度です。
 
 ☀️ 今日の${folder.locationJa}情報
 ${weatherBlock}
@@ -323,7 +345,11 @@ ${marineBlock}
 
 📌 ${themeInfo}
 
+[本文をここに書く]
+
 ${footer}
+
+${subWeatherBlock}
 
 #[タグ1] #[タグ2] #[タグ3] #[タグ4] #[タグ5]`;
 
@@ -514,15 +540,18 @@ export async function GET(request) {
     // --- @motion.imaging ---
     const folderKey = getThisWeekFolder();
     const folder = FOLDERS[folderKey];
+    const subFolderKey = folderKey === 'miyakojima' ? 'ishigaki' : 'miyakojima';
+    const subFolder = FOLDERS[subFolderKey];
 
-    const [weatherInfo, marineInfo] = await Promise.all([
+    const [weatherInfo, marineInfo, subWeatherInfo] = await Promise.all([
       getWeather(folder.lat, folder.lng),
       getMarineInfo(folder.lat, folder.lng),
+      getWeather(subFolder.lat, subFolder.lng),
     ]);
 
     const imageIndex = await getNextImageIndex(folderKey, folder.count);
     const imageUrl = buildImageUrl(folder.path, imageIndex);
-    const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo, imageUrl);
+    const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo, imageUrl, subWeatherInfo);
 
     const postId = await postToInstagram(imageUrl, caption);
     const instagramUrl = buildInstagramUrl(postId);
