@@ -15,6 +15,16 @@ const xClient = new TwitterApi({
   accessSecret: process.env.X_ACCESS_SECRET,
 });
 
+const FIXED_COMMENT = `いつもご覧いただきありがとうございます。
+写真はすべて私自身が撮影したものですが、投稿文の最適化や気象データの解析には生成AIを活用しています。AIの進化に圧倒され、一時期は撮影を離れたこともありましたが、現在は「リアルな一瞬」と「AI」を融合させた表現を追求しています。
+【My Challenge & Life】 アラフィフからの新たな挑戦として、AI活用やアプリ開発をゆっくりですが心から楽しんでいます。いくつになっても新しいことを学ぶ楽しさを、発信を通じて共有できれば嬉しいです。
+【Social Media & Projects】
+* Landscape: @motion.imaging (海・風景)
+* Portrait: @jake_images_ (撮影条件も公開中)
+* X (Twitter): @motion_imaging ↳ 毎朝6時に「花・富士山・雲海・星空」のミゴロン指数を独自計算して発信中！
+* Development: 現在、新しいコミュニケーションツールを開発中です。
+自動生成の予報データに不具合があれば、優しく教えていただけると助かります（笑）。コメントやフォロー、お気軽にどうぞ！`;
+
 async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
@@ -149,6 +159,21 @@ async function getWeather(lat, lng) {
   }
 }
 
+async function getTokyoWeather() {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&daily=temperature_2m_max&timezone=Asia%2FTokyo&forecast_days=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const hourIndex = getCurrentHourIndex();
+    const code    = data.hourly.weathercode[hourIndex];
+    const maxTemp = Math.round(data.daily.temperature_2m_max[0]);
+    const weather = weatherCodeToText(code);
+    return { weather, maxTemp };
+  } catch {
+    return { weather: '晴れ', maxTemp: 25 };
+  }
+}
+
 async function getMarineInfo(lat, lng) {
   try {
     const hourIndex = getCurrentHourIndex();
@@ -263,14 +288,15 @@ function buildImageUrl(folderPath, index) {
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
 }
 
-async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl) {
+async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl, subWeatherInfo) {
   const dateStr  = getDateString();
   const monthDay = getMonthDayString();
   const { weather, temp, windSpeed } = weatherInfo;
   const { waveHeight } = marineInfo;
   const tide = getTideInfo();
 
-  // 画像をbase64に変換してGeminiでテーマ判別
+  const tokyoWeather = await getTokyoWeather();
+
   let themeInfo = getMotionThemeInfo('other', folder.locationJa);
   try {
     const base64 = await imageUrlToBase64(imageUrl);
@@ -284,6 +310,9 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl
   } catch (e) {
     console.error('Theme detection failed:', e.message);
   }
+
+  const subLocationJa = folder.locationJa === '宮古島' ? '石垣島' : '宮古島';
+  const subWeatherBlock = `☀️ ${subLocationJa}の天気：${subWeatherInfo.weather}、気温${subWeatherInfo.temp}℃`;
 
   const weatherBlock = `${monthDay}朝6時の${folder.locationJa}：${weather}、気温${temp}℃
 服装アドバイス：天気・気温に合った具体的なアドバイスを1文で書く`;
@@ -308,12 +337,12 @@ async function generateCaption(apiKey, folder, weatherInfo, marineInfo, imageUrl
 - [本文]の部分だけ新しく書く（100文字程度、${folder.theme}の魅力を自然な文体で）
 - わざとらしい疑問文や「え、〜」で始めない
 - 毎回違う内容にする
-- [天気情報][海況][テーマ情報][フッター][ハッシュタグ]はそのまま出力する（変更禁止）
+- [本文]以外はそのまま出力する（変更禁止）
 - ハッシュタグは厳選5個のみ（増やさない）
 - 余計な説明文は不要、キャプション本文のみ返す
 
 【出力フォーマット】
-[本文をここに書く]
+おはようございます。今日の東京は${tokyoWeather.weather}、最高気温${tokyoWeather.maxTemp}度です。
 
 ☀️ 今日の${folder.locationJa}情報
 ${weatherBlock}
@@ -323,7 +352,13 @@ ${marineBlock}
 
 📌 ${themeInfo}
 
+[本文をここに書く]
+
 ${footer}
+
+${subWeatherBlock}
+
+${FIXED_COMMENT}
 
 #[タグ1] #[タグ2] #[タグ3] #[タグ4] #[タグ5]`;
 
@@ -411,16 +446,13 @@ function parseCSV(text) {
 }
 
 async function postJakeImages() {
-  // 1. 次のインデックス取得
   let current = await redis.get(JAKE_REDIS_KEY);
   if (current === null || current === undefined) current = -1;
   const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
   const imageNum  = String(nextIndex + 1).padStart(2, '0');
 
-  // 2. 画像URL
   const imageUrl = buildImageUrl(JAKE_FOLDER_PATH, nextIndex + 1);
 
-  // 3. CSV から EXIF 取得
   const rows  = await fetchJakeExifCSV();
   const exif  = rows.find(r => (r[JAKE_CSV_COLS.filename] || '') === `${imageNum}.jpg`) || {};
   const fstop   = exif[JAKE_CSV_COLS.fstop]   || '?';
@@ -429,7 +461,6 @@ async function postJakeImages() {
   const lens    = exif[JAKE_CSV_COLS.lens]     || '';
   const loc     = exif[JAKE_CSV_COLS.location] || 'Japan';
 
-  // 4. 画像を見てテーマ判別 + キャプション生成
   let jakeThemeInfo = getJakeThemeInfo('other');
   try {
     const base64 = await imageUrlToBase64(imageUrl);
@@ -439,7 +470,19 @@ async function postJakeImages() {
       'これはポートレート写真です。以下の選択肢から最も当てはまるテーマを1つだけ答えてください。選択肢以外の言葉は不要です。\n選択肢: sakura, kimono, beach, star, flower, street, school, studio, other'
     );
     console.log('🎨 Jake theme:', theme);
-    jakeThemeInfo = getJakeThemeInfo(theme);
+
+    // flowerの場合は花の種類をさらに特定してカスタムコメント生成
+    if (theme.includes('flower') || theme.includes('sakura')) {
+      const flowerPrompt = `このポートレート写真に写っている花は何ですか？花の名前を日本語で答えてください（例：桜、ブーゲンビリア、向日葵、紫陽花、ポピー、チューリップなど）。花が特定できない場合は「花」と答えてください。1〜3語で答えてください。`;
+      const flowerName = await callGeminiWithImage(process.env.GEMINI_API_KEY, base64, flowerPrompt);
+      console.log('🌸 Flower type:', flowerName);
+
+      const flowerInfoPrompt = `ポートレート写真に${flowerName}が写っています。${flowerName}とポートレート撮影の魅力について、インスタグラムのキャプション用に2〜3文で日本語で書いてください。絵文字を1つ使って始めてください。`;
+      jakeThemeInfo = await callGemini(process.env.GEMINI_API_KEY, flowerInfoPrompt);
+      console.log('🌸 Flower info:', jakeThemeInfo);
+    } else {
+      jakeThemeInfo = getJakeThemeInfo(theme);
+    }
   } catch (e) {
     console.error('Jake theme detection failed:', e.message);
   }
@@ -468,11 +511,12 @@ async function postJakeImages() {
 サブ → @motion.imaging
 お仕事はプロフィールから
 
+${FIXED_COMMENT}
+
 #ポートレート #portrait #portraitphotography #日本 #ソニー`;
 
   const caption = await callGemini(process.env.GEMINI_API_KEY, prompt);
 
-  // 5. Instagram 投稿
   const igId    = process.env.JAKE_IMAGES_ACCOUNT_ID;
   const igToken = process.env.JAKE_IMAGES_ACCESS_TOKEN;
 
@@ -494,7 +538,6 @@ async function postJakeImages() {
   const pData = await pRes.json();
   if (pData.error) throw new Error('Jake Publish Error: ' + pData.error.message);
 
-  // 6. Redis 更新
   await redis.set(JAKE_REDIS_KEY, nextIndex);
 
   return { success: true, imageNumber: imageNum, postId: pData.id, caption };
@@ -511,24 +554,25 @@ export async function GET(request) {
   }
 
   try {
-    // --- @motion.imaging ---
     const folderKey = getThisWeekFolder();
     const folder = FOLDERS[folderKey];
+    const subFolderKey = folderKey === 'miyakojima' ? 'ishigaki' : 'miyakojima';
+    const subFolder = FOLDERS[subFolderKey];
 
-    const [weatherInfo, marineInfo] = await Promise.all([
+    const [weatherInfo, marineInfo, subWeatherInfo] = await Promise.all([
       getWeather(folder.lat, folder.lng),
       getMarineInfo(folder.lat, folder.lng),
+      getWeather(subFolder.lat, subFolder.lng),
     ]);
 
     const imageIndex = await getNextImageIndex(folderKey, folder.count);
     const imageUrl = buildImageUrl(folder.path, imageIndex);
-    const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo, imageUrl);
+    const caption = await generateCaption(process.env.GEMINI_API_KEY, folder, weatherInfo, marineInfo, imageUrl, subWeatherInfo);
 
     const postId = await postToInstagram(imageUrl, caption);
     const instagramUrl = buildInstagramUrl(postId);
     await postToX(folder, instagramUrl);
 
-    // --- @jake_images_ ---
     let jakeResult = null;
     try {
       jakeResult = await postJakeImages();
