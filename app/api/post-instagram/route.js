@@ -470,7 +470,19 @@ async function postJakeImages() {
       'これはポートレート写真です。以下の選択肢から最も当てはまるテーマを1つだけ答えてください。選択肢以外の言葉は不要です。\n選択肢: sakura, kimono, beach, star, flower, street, school, studio, other'
     );
     console.log('🎨 Jake theme:', theme);
-    jakeThemeInfo = getJakeThemeInfo(theme);
+
+    // flowerの場合は花の種類をさらに特定してカスタムコメント生成
+    if (theme.includes('flower') || theme.includes('sakura')) {
+      const flowerPrompt = `このポートレート写真に写っている花は何ですか？花の名前を日本語で答えてください（例：桜、ブーゲンビリア、向日葵、紫陽花、ポピー、チューリップなど）。花が特定できない場合は「花」と答えてください。1〜3語で答えてください。`;
+      const flowerName = await callGeminiWithImage(process.env.GEMINI_API_KEY, base64, flowerPrompt);
+      console.log('🌸 Flower type:', flowerName);
+
+      const flowerInfoPrompt = `ポートレート写真に${flowerName}が写っています。${flowerName}とポートレート撮影の魅力について、インスタグラムのキャプション用に2〜3文で日本語で書いてください。絵文字を1つ使って始めてください。`;
+      jakeThemeInfo = await callGemini(process.env.GEMINI_API_KEY, flowerInfoPrompt);
+      console.log('🌸 Flower info:', jakeThemeInfo);
+    } else {
+      jakeThemeInfo = getJakeThemeInfo(theme);
+    }
   } catch (e) {
     console.error('Jake theme detection failed:', e.message);
   }
