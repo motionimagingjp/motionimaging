@@ -88,17 +88,6 @@ function getJST() {
   return new Date(Date.now() + 9 * 3600000);
 }
 
-function getDayOfWeek() {
-  return getJST().getDay();
-}
-
-function getWeekNumber() {
-  const jst = getJST();
-  const startOfYear = new Date(jst.getFullYear(), 0, 1);
-  const dayOfYear = Math.floor((jst - startOfYear) / 86400000);
-  return Math.floor(dayOfYear / 7);
-}
-
 function getDateString() {
   const jst = getJST();
   const y = jst.getFullYear();
@@ -161,7 +150,7 @@ async function getWeather(lat, lng) {
 
 async function getTokyoWeather() {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&daily=temperature_2m_max&timezone=Asia%2FTokyo&forecast_days=1`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&daily=temperature_2m_max&timezone=Asia%2FTokyo&forecast_days=2`;
     const res = await fetch(url);
     const data = await res.json();
     const hourIndex = getCurrentHourIndex();
@@ -266,9 +255,13 @@ const FOLDERS = {
   },
 };
 
-function getThisWeekFolder() {
-  const week = getWeekNumber();
-  return week % 2 === 0 ? 'ishigaki' : 'miyakojima';
+async function getThisWeekFolder() {
+  const miyakoVal  = await redis.get('ig_motion_imaging_miyakojima') ?? -1;
+  const ishigakiVal = await redis.get('ig_motion_imaging_ishigaki') ?? -1;
+  const total = (parseInt(miyakoVal) + 1) + (parseInt(ishigakiVal) + 1);
+  const block = Math.floor(total / 6) % 2;
+  console.log(`📁 Folder select: miyako=${miyakoVal} ishigaki=${ishigakiVal} total=${total} block=${block}`);
+  return block === 0 ? 'miyakojima' : 'ishigaki';
 }
 
 async function getNextImageIndex(folderKey, totalCount) {
@@ -471,12 +464,10 @@ async function postJakeImages() {
     );
     console.log('🎨 Jake theme:', theme);
 
-    // flowerの場合は花の種類をさらに特定してカスタムコメント生成
     if (theme.includes('flower') || theme.includes('sakura')) {
       const flowerPrompt = `このポートレート写真に写っている花は何ですか？花の名前を日本語で答えてください（例：桜、ブーゲンビリア、向日葵、紫陽花、ポピー、チューリップなど）。花が特定できない場合は「花」と答えてください。1〜3語で答えてください。`;
       const flowerName = await callGeminiWithImage(process.env.GEMINI_API_KEY, base64, flowerPrompt);
       console.log('🌸 Flower type:', flowerName);
-
       const flowerInfoPrompt = `ポートレート写真に${flowerName}が写っています。${flowerName}とポートレート撮影の魅力について、インスタグラムのキャプション用に2〜3文で日本語で書いてください。絵文字を1つ使って始めてください。`;
       jakeThemeInfo = await callGemini(process.env.GEMINI_API_KEY, flowerInfoPrompt);
       console.log('🌸 Flower info:', jakeThemeInfo);
@@ -554,7 +545,7 @@ export async function GET(request) {
   }
 
   try {
-    const folderKey = getThisWeekFolder();
+    const folderKey = await getThisWeekFolder();
     const folder = FOLDERS[folderKey];
     const subFolderKey = folderKey === 'miyakojima' ? 'ishigaki' : 'miyakojima';
     const subFolder = FOLDERS[subFolderKey];
