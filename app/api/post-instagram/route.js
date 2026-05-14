@@ -150,13 +150,15 @@ async function getWeather(lat, lng) {
 
 async function getTokyoWeather() {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&daily=temperature_2m_max&timezone=Asia%2FTokyo&forecast_days=2`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&timezone=Asia%2FTokyo&forecast_days=2`;
     const res = await fetch(url);
     const data = await res.json();
     const hourIndex = getCurrentHourIndex();
     const code    = data.hourly.weathercode[hourIndex];
-    const maxTemp = Math.round(data.daily.temperature_2m_max[0]);
     const weather = weatherCodeToText(code);
+    // 今日0〜23時の気温から最高値を計算
+    const todayTemps = data.hourly.temperature_2m.slice(0, 24);
+    const maxTemp = Math.round(Math.max(...todayTemps));
     return { weather, maxTemp };
   } catch {
     return { weather: '晴れ', maxTemp: 25 };
@@ -256,11 +258,11 @@ const FOLDERS = {
 };
 
 async function getThisWeekFolder() {
-  const miyakoVal  = await redis.get('ig_motion_imaging_miyakojima') ?? -1;
+  const miyakoVal   = await redis.get('ig_motion_imaging_miyakojima') ?? -1;
   const ishigakiVal = await redis.get('ig_motion_imaging_ishigaki') ?? -1;
   const total = (parseInt(miyakoVal) + 1) + (parseInt(ishigakiVal) + 1);
   const block = Math.floor(total / 6) % 2;
-  console.log(`📁 Folder select: miyako=${miyakoVal} ishigaki=${ishigakiVal} total=${total} block=${block}`);
+  console.log(`📁 Folder: miyako=${miyakoVal} ishigaki=${ishigakiVal} total=${total} block=${block}`);
   return block === 0 ? 'miyakojima' : 'ishigaki';
 }
 
@@ -439,6 +441,15 @@ function parseCSV(text) {
 }
 
 async function postJakeImages() {
+  // 今日すでにjake投稿済みチェック
+  const jakeTodayKey = `ig_jake_posted_date`;
+  const today = getDateString();
+  const jakeLastPosted = await redis.get(jakeTodayKey);
+  if (jakeLastPosted === today) {
+    console.log('⚠️ Jake already posted today, skipping');
+    return { skipped: true };
+  }
+
   let current = await redis.get(JAKE_REDIS_KEY);
   if (current === null || current === undefined) current = -1;
   const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
@@ -529,7 +540,9 @@ ${FIXED_COMMENT}
   const pData = await pRes.json();
   if (pData.error) throw new Error('Jake Publish Error: ' + pData.error.message);
 
+  // Redis更新
   await redis.set(JAKE_REDIS_KEY, nextIndex);
+  await redis.set(jakeTodayKey, today, { ex: 90000 });
 
   return { success: true, imageNumber: imageNum, postId: pData.id, caption };
 }
@@ -542,6 +555,27 @@ export async function GET(request) {
   const authHeader = request.headers.get('authorization');
   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
     return new Response('Unauthorized', { status: 401 });
+  }
+
+  // 今日すでにmotion.imaging投稿済みチェック
+  const motionTodayKey = `ig_motion_posted_date`;
+  const today = getDateString();
+  const motionLastPosted = await redis.get(motionTodayKey);
+
+  if (motionLastPosted === today) {
+    console.log('⚠️ Motion already posted today, skipping');
+    // motionはスキップするがjakeは試みる
+    let jakeResult = null;
+    try {
+      jakeResult = await postJakeImages();
+      console.log('✅ jake_images_ posted:', jakeResult?.imageNumber);
+    } catch (err) {
+      console.error('❌ jake_images_ failed:', err.message);
+    }
+    return new Response(JSON.stringify({
+      message: 'motion.imagingは本日投稿済みのためスキップ',
+      jakeImages: jakeResult
+    }), { status: 200 });
   }
 
   try {
@@ -564,6 +598,10 @@ export async function GET(request) {
     const instagramUrl = buildInstagramUrl(postId);
     await postToX(folder, instagramUrl);
 
+    // 投稿済み日付を保存（25時間で期限切れ）
+    await redis.set(motionTodayKey, today, { ex: 90000 });
+
+    // jake_images_
     let jakeResult = null;
     try {
       jakeResult = await postJakeImages();
