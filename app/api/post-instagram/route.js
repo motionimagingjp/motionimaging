@@ -220,21 +220,6 @@ async function getWeather(lat, lng) {
   }
 }
 
-async function getTokyoWeather() {
-  try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&timezone=Asia%2FTokyo&forecast_days=2`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const hourIndex = getCurrentHourIndex();
-    const code    = data.hourly.weathercode[hourIndex];
-    const todayTemps = data.hourly.temperature_2m.slice(0, 24);
-    const maxTemp = Math.round(Math.max(...todayTemps));
-    return { weather: weatherCodeToText(code), maxTemp };
-  } catch {
-    return { weather: '晴れ', maxTemp: 25 };
-  }
-}
-
 async function getMarineInfo(lat, lng) {
   try {
     const hourIndex = getCurrentHourIndex();
@@ -251,7 +236,6 @@ async function getMarineInfo(lat, lng) {
 // ビジネスロジック
 // ============================================================
 
-// 6枚ごとに宮古島↔石垣島を切り替え
 async function getCurrentFolder() {
   const miyakoVal   = await redis.get(`${ACCOUNT}_miyakojima`) ?? -1;
   const ishigakiVal = await redis.get(`${ACCOUNT}_ishigaki`)   ?? -1;
@@ -290,11 +274,10 @@ async function detectTheme(apiKey, imageUrl, locationJa) {
 }
 
 async function generateCaption(folder, weatherInfo, marineInfo, subWeatherInfo, imageUrl) {
-  const dateStr    = getDateString();
-  const monthDay   = getMonthDayString();
-  const tokyoWx    = await getTokyoWeather();
-  const themeInfo  = await detectTheme(process.env.GEMINI_API_KEY, imageUrl, folder.locationJa);
-  const subLocJa   = folder.locationJa === '宮古島' ? '石垣島' : '宮古島';
+  const dateStr   = getDateString();
+  const monthDay  = getMonthDayString();
+  const themeInfo = await detectTheme(process.env.GEMINI_API_KEY, imageUrl, folder.locationJa);
+  const subLocJa  = folder.locationJa === '宮古島' ? '石垣島' : '宮古島';
 
   const weatherBlock = `${monthDay}朝6時の${folder.locationJa}：${weatherInfo.weather}、気温${weatherInfo.temp}℃
 服装アドバイス：天気・気温に合った具体的なアドバイスを1文で書く`;
@@ -324,8 +307,6 @@ async function generateCaption(folder, weatherInfo, marineInfo, subWeatherInfo, 
 - 余計な説明文は不要、キャプション本文のみ返す
 
 【出力フォーマット】
-おはようございます。今日の東京は${tokyoWx.weather}、最高気温${tokyoWx.maxTemp}度です。
-
 ☀️ 今日の${folder.locationJa}情報
 ${weatherBlock}
 
@@ -415,7 +396,6 @@ export async function GET(request) {
     const caption    = await generateCaption(folder, weatherInfo, marineInfo, subWeatherInfo, imageUrl);
     const postId     = await postToInstagram(imageUrl, caption);
 
-    // 投稿済み日付を保存（25時間で期限切れ）
     await redis.set(todayKey, today, { ex: 90000 });
 
     console.log(`✅ motion.imaging posted: ${folderKey} ${String(imageIndex).padStart(2,'0')}.jpg`);
