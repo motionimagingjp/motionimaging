@@ -88,17 +88,6 @@ function getJST() {
   return new Date(Date.now() + 9 * 3600000);
 }
 
-function getDayOfWeek() {
-  return getJST().getDay();
-}
-
-function getWeekNumber() {
-  const jst = getJST();
-  const startOfYear = new Date(jst.getFullYear(), 0, 1);
-  const dayOfYear = Math.floor((jst - startOfYear) / 86400000);
-  return Math.floor(dayOfYear / 7);
-}
-
 function getDateString() {
   const jst = getJST();
   const y = jst.getFullYear();
@@ -161,13 +150,15 @@ async function getWeather(lat, lng) {
 
 async function getTokyoWeather() {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&daily=temperature_2m_max&timezone=Asia%2FTokyo&forecast_days=1`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&timezone=Asia%2FTokyo&forecast_days=2`;
     const res = await fetch(url);
     const data = await res.json();
     const hourIndex = getCurrentHourIndex();
     const code    = data.hourly.weathercode[hourIndex];
-    const maxTemp = Math.round(data.daily.temperature_2m_max[0]);
     const weather = weatherCodeToText(code);
+    // 今日0〜23時の気温から最高値を計算
+    const todayTemps = data.hourly.temperature_2m.slice(0, 24);
+    const maxTemp = Math.round(Math.max(...todayTemps));
     return { weather, maxTemp };
   } catch {
     return { weather: '晴れ', maxTemp: 25 };
@@ -266,9 +257,13 @@ const FOLDERS = {
   },
 };
 
-function getThisWeekFolder() {
-  const week = getWeekNumber();
-  return week % 2 === 0 ? 'ishigaki' : 'miyakojima';
+async function getThisWeekFolder() {
+  const miyakoVal   = await redis.get('ig_motion_imaging_miyakojima') ?? -1;
+  const ishigakiVal = await redis.get('ig_motion_imaging_ishigaki') ?? -1;
+  const total = (parseInt(miyakoVal) + 1) + (parseInt(ishigakiVal) + 1);
+  const block = Math.floor(total / 6) % 2;
+  console.log(`📁 Folder: miyako=${miyakoVal} ishigaki=${ishigakiVal} total=${total} block=${block}`);
+  return block === 0 ? 'miyakojima' : 'ishigaki';
 }
 
 async function getNextImageIndex(folderKey, totalCount) {
@@ -446,6 +441,15 @@ function parseCSV(text) {
 }
 
 async function postJakeImages() {
+  // 今日すでにjake投稿済みチェック
+  const jakeTodayKey = `ig_jake_posted_date`;
+  const today = getDateString();
+  const jakeLastPosted = await redis.get(jakeTodayKey);
+  if (jakeLastPosted === today) {
+    console.log('⚠️ Jake already posted today, skipping');
+    return { skipped: true };
+  }
+
   let current = await redis.get(JAKE_REDIS_KEY);
   if (current === null || current === undefined) current = -1;
   const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
@@ -471,12 +475,10 @@ async function postJakeImages() {
     );
     console.log('🎨 Jake theme:', theme);
 
-    // flowerの場合は花の種類をさらに特定してカスタムコメント生成
     if (theme.includes('flower') || theme.includes('sakura')) {
       const flowerPrompt = `このポートレート写真に写っている花は何ですか？花の名前を日本語で答えてください（例：桜、ブーゲンビリア、向日葵、紫陽花、ポピー、チューリップなど）。花が特定できない場合は「花」と答えてください。1〜3語で答えてください。`;
       const flowerName = await callGeminiWithImage(process.env.GEMINI_API_KEY, base64, flowerPrompt);
       console.log('🌸 Flower type:', flowerName);
-
       const flowerInfoPrompt = `ポートレート写真に${flowerName}が写っています。${flowerName}とポートレート撮影の魅力について、インスタグラムのキャプション用に2〜3文で日本語で書いてください。絵文字を1つ使って始めてください。`;
       jakeThemeInfo = await callGemini(process.env.GEMINI_API_KEY, flowerInfoPrompt);
       console.log('🌸 Flower info:', jakeThemeInfo);
@@ -538,7 +540,9 @@ ${FIXED_COMMENT}
   const pData = await pRes.json();
   if (pData.error) throw new Error('Jake Publish Error: ' + pData.error.message);
 
+  // Redis更新
   await redis.set(JAKE_REDIS_KEY, nextIndex);
+  await redis.set(jakeTodayKey, today, { ex: 90000 });
 
   return { success: true, imageNumber: imageNum, postId: pData.id, caption };
 }
@@ -553,8 +557,29 @@ export async function GET(request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
+  // 今日すでにmotion.imaging投稿済みチェック
+  const motionTodayKey = `ig_motion_posted_date`;
+  const today = getDateString();
+  const motionLastPosted = await redis.get(motionTodayKey);
+
+  if (motionLastPosted === today) {
+    console.log('⚠️ Motion already posted today, skipping');
+    // motionはスキップするがjakeは試みる
+    let jakeResult = null;
+    try {
+      jakeResult = await postJakeImages();
+      console.log('✅ jake_images_ posted:', jakeResult?.imageNumber);
+    } catch (err) {
+      console.error('❌ jake_images_ failed:', err.message);
+    }
+    return new Response(JSON.stringify({
+      message: 'motion.imagingは本日投稿済みのためスキップ',
+      jakeImages: jakeResult
+    }), { status: 200 });
+  }
+
   try {
-    const folderKey = getThisWeekFolder();
+    const folderKey = await getThisWeekFolder();
     const folder = FOLDERS[folderKey];
     const subFolderKey = folderKey === 'miyakojima' ? 'ishigaki' : 'miyakojima';
     const subFolder = FOLDERS[subFolderKey];
@@ -573,6 +598,10 @@ export async function GET(request) {
     const instagramUrl = buildInstagramUrl(postId);
     await postToX(folder, instagramUrl);
 
+    // 投稿済み日付を保存（25時間で期限切れ）
+    await redis.set(motionTodayKey, today, { ex: 90000 });
+
+    // jake_images_
     let jakeResult = null;
     try {
       jakeResult = await postJakeImages();
