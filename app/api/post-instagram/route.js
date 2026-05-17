@@ -8,10 +8,6 @@ const redis = new Redis({
   token: process.env.KV_REST_API_TOKEN,
 });
 
-// ============================================================
-// 定数
-// ============================================================
-
 const FIXED_COMMENT = `いつもご覧いただきありがとうございます。
 写真はすべて私自身が撮影したものですが、投稿文の最適化や気象データの解析には生成AIを活用しています。AIの進化に圧倒され、一時期は撮影を離れたこともありましたが、現在は「リアルな一瞬」と「AI」を融合させた表現を追求しています。
 【My Challenge & Life】 アラフィフからの新たな挑戦として、AI活用やアプリ開発をゆっくりですが心から楽しんでいます。いくつになっても新しいことを学ぶ楽しさを、発信を通じて共有できれば嬉しいです。
@@ -71,10 +67,6 @@ const THEME_INFO = {
     '石垣島': '🌊 石垣島の魅力：八重山諸島の玄関口として多くの離島へのアクセス拠点。独自の文化と自然が共存する豊かな島。',
   },
 };
-
-// ============================================================
-// ユーティリティ関数
-// ============================================================
 
 function getJST() {
   return new Date(Date.now() + 9 * 3600000);
@@ -141,10 +133,6 @@ function buildImageUrl(folderPath, index) {
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
 }
 
-// ============================================================
-// API呼び出し
-// ============================================================
-
 async function callGemini(apiKey, prompt) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
@@ -166,7 +154,7 @@ async function callGemini(apiKey, prompt) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
-async function callGeminiWithImage(apiKey, imageBase64, textPrompt) {
+async function callGeminiWithImage(apiKey, imageBase64, textPrompt, maxTokens = 50) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const res = await fetch(url, {
     method: 'POST',
@@ -180,7 +168,7 @@ async function callGeminiWithImage(apiKey, imageBase64, textPrompt) {
       }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 50,
+        maxOutputTokens: maxTokens,
         thinkingConfig: { thinkingBudget: 0 }
       }
     })
@@ -189,7 +177,7 @@ async function callGeminiWithImage(apiKey, imageBase64, textPrompt) {
   if (data.error) throw new Error('Gemini Vision Error: ' + data.error.message);
   const parts = data.candidates[0].content.parts;
   const textPart = parts.find(p => p.text && !p.thought);
-  return (textPart ? textPart.text : parts[parts.length - 1].text).trim().toLowerCase();
+  return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
 async function imageUrlToBase64(imageUrl) {
@@ -232,10 +220,6 @@ async function getMarineInfo(lat, lng) {
   }
 }
 
-// ============================================================
-// ビジネスロジック
-// ============================================================
-
 async function getCurrentFolder() {
   const miyakoVal   = await redis.get(`${ACCOUNT}_miyakojima`) ?? -1;
   const ishigakiVal = await redis.get(`${ACCOUNT}_ishigaki`)   ?? -1;
@@ -246,37 +230,63 @@ async function getCurrentFolder() {
   return folderKey;
 }
 
+// ✅ 書き込みしない・計算だけ返す
 async function getNextImageIndex(folderKey) {
   const kvKey  = `${ACCOUNT}_${folderKey}`;
   const folder = FOLDERS[folderKey];
   let current  = await redis.get(kvKey);
   if (current === null || current === undefined) current = -1;
   const next = (parseInt(current) + 1) % folder.count;
-  return { next, kvKey }; // ← redis.setを削除してこれだけにする
+  return { next, kvKey };
 }
 
-async function detectTheme(apiKey, imageUrl, locationJa) {
+// ✅ テーマ判別と冒頭1行を1回のAPI呼び出しで取得
+async function detectThemeAndOpening(apiKey, imageUrl, locationJa, weatherInfo) {
   try {
     const base64 = await imageUrlToBase64(imageUrl);
-    const theme  = await callGeminiWithImage(
+    const raw = await callGeminiWithImage(
       apiKey,
       base64,
-      `これは${locationJa}で撮影された写真です。以下の選択肢から最も当てはまるテーマを1つだけ答えてください。選択肢以外の言葉は不要です。\n選択肢: beach, star, diving, flower_buffalo, sunset, other`
+      `この写真について2つ答えてください。必ず以下のフォーマットで返してください。
+
+THEME: [beach / star / diving / flower_buffalo / sunset / other のいずれか1つ]
+OPENING: [${locationJa}の情景と感情が伝わる詩的な一行、20〜35文字、句読点なし、絵文字なし、感嘆詞禁止、疑問文禁止]
+
+天気の参考情報：${weatherInfo.weather}`,
+      120
     );
-    console.log('🎨 Theme:', theme);
-    const key = Object.keys(THEME_INFO).find(k => theme.includes(k)) || 'other';
-    return THEME_INFO[key][locationJa] || THEME_INFO['other'][locationJa];
+
+    console.log('🎨 Raw vision response:', raw);
+
+    const themeMatch   = raw.match(/THEME:\s*(\S+)/i);
+    const openingMatch = raw.match(/OPENING:\s*(.+)/i);
+
+    const themeRaw = themeMatch   ? themeMatch[1].toLowerCase().trim() : 'other';
+    const opening  = openingMatch ? openingMatch[1].trim()             : `${locationJa}の光が静かに海へ溶けていく`;
+
+    const key      = Object.keys(THEME_INFO).find(k => themeRaw.includes(k)) || 'other';
+    const themeInfo = THEME_INFO[key][locationJa] || THEME_INFO['other'][locationJa];
+
+    console.log(`🎨 Theme: ${key} / Opening: ${opening}`);
+    return { themeInfo, opening };
+
   } catch (e) {
-    console.error('Theme detection failed:', e.message);
-    return THEME_INFO['other'][locationJa];
+    console.error('detectThemeAndOpening failed:', e.message);
+    return {
+      themeInfo: THEME_INFO['other'][locationJa],
+      opening:   `${locationJa}の光が静かに海へ溶けていく`,
+    };
   }
 }
 
 async function generateCaption(folder, weatherInfo, marineInfo, subWeatherInfo, imageUrl) {
-  const dateStr   = getDateString();
-  const monthDay  = getMonthDayString();
-  const themeInfo = await detectTheme(process.env.GEMINI_API_KEY, imageUrl, folder.locationJa);
-  const subLocJa  = folder.locationJa === '宮古島' ? '石垣島' : '宮古島';
+  const dateStr  = getDateString();
+  const monthDay = getMonthDayString();
+  const subLocJa = folder.locationJa === '宮古島' ? '石垣島' : '宮古島';
+
+  const { themeInfo, opening } = await detectThemeAndOpening(
+    process.env.GEMINI_API_KEY, imageUrl, folder.locationJa, weatherInfo
+  );
 
   const weatherBlock = `${monthDay}朝6時の${folder.locationJa}：${weatherInfo.weather}、気温${weatherInfo.temp}℃
 服装アドバイス：天気・気温に合った具体的なアドバイスを1文で書く`;
@@ -306,6 +316,8 @@ async function generateCaption(folder, weatherInfo, marineInfo, subWeatherInfo, 
 - 余計な説明文は不要、キャプション本文のみ返す
 
 【出力フォーマット】
+${opening}
+
 ☀️ 今日の${folder.locationJa}情報
 ${weatherBlock}
 
@@ -358,17 +370,12 @@ async function postToInstagram(imageUrl, caption) {
   return pData.id;
 }
 
-// ============================================================
-// メインハンドラー
-// ============================================================
-
 export async function GET(request) {
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  // 2重投稿防止
   const today      = getDateString();
   const todayKey   = 'ig_motion_posted_date';
   const lastPosted = await redis.get(todayKey);
@@ -390,12 +397,16 @@ export async function GET(request) {
       getWeather(subFolder.lat, subFolder.lng),
     ]);
 
-    const imageIndex = await getNextImageIndex(folderKey);
+    const { next, kvKey } = await getNextImageIndex(folderKey);
+    const imageIndex = next + 1;
     const imageUrl   = buildImageUrl(folder.path, imageIndex);
     const caption    = await generateCaption(folder, weatherInfo, marineInfo, subWeatherInfo, imageUrl);
-    const postId     = await postToInstagram(imageUrl, caption);
 
+    // ✅ 投稿前にフラグとインデックスを両方確定
     await redis.set(todayKey, today, { ex: 90000 });
+    await redis.set(kvKey, next);
+
+    const postId = await postToInstagram(imageUrl, caption);
 
     console.log(`✅ motion.imaging posted: ${folderKey} ${String(imageIndex).padStart(2,'0')}.jpg`);
 
