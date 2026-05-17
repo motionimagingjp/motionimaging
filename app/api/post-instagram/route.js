@@ -252,8 +252,7 @@ async function getNextImageIndex(folderKey) {
   let current  = await redis.get(kvKey);
   if (current === null || current === undefined) current = -1;
   const next = (parseInt(current) + 1) % folder.count;
-  await redis.set(kvKey, next);
-  return next + 1;
+  return { next, kvKey }; // ← redis.setを削除してこれだけにする
 }
 
 async function detectTheme(apiKey, imageUrl, locationJa) {
