@@ -301,7 +301,7 @@ export async function GET(request) {
       } catch (err) {
         results[key] = { ok: false, error: err.message };
       }
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 15000));
     }
 
     return new Response(JSON.stringify({ message: 'Success', results, weatherJA, penalty, max }), { status: 200 });
