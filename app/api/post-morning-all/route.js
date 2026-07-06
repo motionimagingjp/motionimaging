@@ -219,7 +219,7 @@ async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN,
     memo = weatherEN + ' conditions today.';
   }
   const ranked = spots.sort((a, b) => b.score - a.score);
-  let tweet = 'Bloom Index [' + dateLabel + ']\n';
+  let tweet = 'Bloom Index [' + dateLabel + '] 🌸\n';
   for (const s of ranked) tweet += s.emoji + ' ' + s.name + ' (' + s.score + '%)\n';
   tweet += 'Migoron Note: ' + memo + '\n';
   tweet += '#JapaneseFlowers #LandscapePhotography #Migoron';
