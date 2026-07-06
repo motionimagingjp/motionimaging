@@ -219,7 +219,9 @@ async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN,
     memo = weatherEN + ' conditions today.';
   }
   const ranked = spots.sort((a, b) => b.score - a.score);
-  let tweet = 'Bloom Index [' + dateLabel + '] 🌸\n';
+  const now = new Date(Date.now() + 9 * 3600000);
+  const timeStr = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
+  let tweet = 'Bloom Index [' + dateLabel + '] ' + timeStr + ' JST\n';
   for (const s of ranked) tweet += s.emoji + ' ' + s.name + ' (' + s.score + '%)\n';
   tweet += 'Migoron Note: ' + memo + '\n';
   tweet += '#JapaneseFlowers #LandscapePhotography #Migoron';
