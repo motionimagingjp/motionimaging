@@ -232,10 +232,10 @@ ${FIXED_COMMENT}
 // ============================================================
 
 export async function GET(request) {
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new Response('Unauthorized', { status: 401 });
-  }
+// const authHeader = request.headers.get('authorization');
+  // if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  //   return new Response('Unauthorized', { status: 401 });
+  // }
 
   // 2重投稿防止
   const today      = getDateString();
