@@ -314,6 +314,7 @@ export async function GET(request) {
     const baseUrl = proto + '://' + host;
 
     const igResults = {};
+        const igResults = {};
     for (const path of ['/api/post-instagram', '/api/post-jake-images']) {
       try {
         const igRes = await fetch(baseUrl + path, {
@@ -325,6 +326,7 @@ export async function GET(request) {
       }
       await new Promise(r => setTimeout(r, 3000));
     }
+
 
     return new Response(JSON.stringify({ message: 'Success', results, igResults, weatherJA, penalty, max }), { status: 200 });
   } catch (error) {
