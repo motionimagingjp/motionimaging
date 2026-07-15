@@ -219,12 +219,14 @@ async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN,
     memo = weatherEN + ' conditions today.';
   }
   const ranked = spots.sort((a, b) => b.score - a.score);
-  const now = new Date(Date.now() + 9 * 3600000);
-  const timeStr = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-  let tweet = 'Bloom Index [' + dateLabel + '] ' + timeStr + ' JST\n';
-  for (const s of ranked) tweet += s.emoji + ' ' + s.name + ' (' + s.score + '%)\n';
-  tweet += 'Migoron Note: ' + memo + '\n';
-  tweet += '#JapaneseFlowers #LandscapePhotography #Migoron';
+  let tweet = '🌸 Kanto Bloom Report — ' + dateLabel + '\n';
+  let rank = 1;
+  for (const s of ranked) {
+    tweet += rank + '. ' + s.name + ' — ' + s.score + '%\n';
+    rank++;
+  }
+  tweet += 'Note: ' + memo + '\n';
+  tweet += '#JapanFlowers #LandscapePhotography #Migoron';
   return tweet;
 }
 
@@ -267,10 +269,10 @@ async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
 }
 
 export async function GET(request) {
-  //　const authHeader = request.headers.get('authorization');
-  //　if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
-  //　  return new Response('Unauthorized', { status: 401 });
-  //　}
+  　const authHeader = request.headers.get('authorization');
+  　if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
+  　  return new Response('Unauthorized', { status: 401 });
+  　}
   try {
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
