@@ -1,5 +1,6 @@
 import { TwitterApi } from 'twitter-api-v2';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 function getTodayLabel() {
   const jst = new Date(Date.now() + 9 * 3600000);
@@ -101,6 +102,18 @@ function getHoliday(year, month, day) {
   return h[month + '-' + day] || null;
 }
 
+// 安全なJSON抽出（失敗してもnullを返すだけで死なない）
+function safeParseJson(raw) {
+  try {
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const match = clean.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
 async function getDaytimeWeather() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&timezone=Asia%2FTokyo&forecast_days=1';
@@ -156,21 +169,23 @@ async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA,
   const seasonInfo = sakura
     ? '桜シーズン。2月1日からの積算温度で開花進捗を算出（開花210℃/満開370℃）。関東・近郊の桜名所5件。'
     : '今が旬の花：' + flowers.join('、') + '。関東・近郊の実在する名所5件を選ぶ。';
-  const prompt = '以下の条件で花スポット5件のミゴロン指数を算出してください。\n'
-    + '条件：' + seasonInfo + '\n'
-    + '日付：' + dateLabel + '\n'
-    + '今日の天気：' + weatherJA + '（最高' + max + '℃）\n'
-    + '天気による指数補正：各スポットの指数から' + penalty + '%を差し引くこと。\n\n'
-    + '必ず以下のJSON形式のみで返してください。マークダウン不要。\n'
-    + '{"spots":[{"name":"ひたち海浜公園（茨城）","emoji":"🌼","score":65},{"name":"あしかがフラワーパーク（栃木）","emoji":"🌸","score":58},{"name":"昭和記念公園（東京）","emoji":"🌷","score":52},{"name":"国営武蔵丘陵森林公園（埼玉）","emoji":"🌿","score":45},{"name":"横浜公園（神奈川）","emoji":"🌺","score":38}],"memo":"今日のコンディションを一言で"}';
-  const raw = await callGemini(apiKey, prompt);
-  const clean = raw.replace(/```json|```/g, '').trim();
-  const match = clean.match(/\{[\s\S]*\}/);
+  let parsed = null;
+  try {
+    const prompt = '以下の条件で花スポット5件のミゴロン指数を算出してください。\n'
+      + '条件：' + seasonInfo + '\n'
+      + '日付：' + dateLabel + '\n'
+      + '今日の天気：' + weatherJA + '（最高' + max + '℃）\n'
+      + '天気による指数補正：各スポットの指数から' + penalty + '%を差し引くこと。\n\n'
+      + '必ず以下のJSON形式のみで返してください。マークダウン不要。\n'
+      + '{"spots":[{"name":"ひたち海浜公園（茨城）","emoji":"🌼","score":65},{"name":"あしかがフラワーパーク（栃木）","emoji":"🌸","score":58},{"name":"昭和記念公園（東京）","emoji":"🌷","score":52},{"name":"国営武蔵丘陵森林公園（埼玉）","emoji":"🌿","score":45},{"name":"横浜公園（神奈川）","emoji":"🌺","score":38}],"memo":"今日のコンディションを一言で"}';
+    const raw = await callGemini(apiKey, prompt);
+    parsed = safeParseJson(raw);
+  } catch { parsed = null; }
+
   let spots, memo;
-  if (match) {
-    const parsed = JSON.parse(match[0]);
+  if (parsed && parsed.spots) {
     spots = parsed.spots;
-    memo = parsed.memo;
+    memo = parsed.memo || '各地で花が見頃です。';
   } else {
     spots = [
       { name: 'ひたち海浜公園（茨城）', emoji: '🌼', score: Math.max(10, 95 - penalty) },
@@ -179,7 +194,7 @@ async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA,
       { name: '国営武蔵丘陵森林公園（埼玉）', emoji: '🌿', score: Math.max(10, 75 - penalty) },
       { name: '横浜公園（神奈川）', emoji: '🌺', score: Math.max(10, 68 - penalty) },
     ];
-    memo = weatherJA + 'のため撮影条件に注意。';
+    memo = weatherJA + 'の一日、見頃の花をチェック。';
   }
   const ranked = spots.sort((a, b) => b.score - a.score);
   let tweet = '花畑指数【' + dateLabel + '】\n';
@@ -193,21 +208,23 @@ async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN,
   const seasonInfo = sakura
     ? 'Cherry blossom season. Calculate bloom progress from Feb 1 accumulated temp (bloom at 210C, full bloom at 370C). Select 5 real sakura spots in Kanto.'
     : 'In-season flowers: ' + flowers.join(', ') + '. Select 5 real flower spots in Kanto region.';
-  const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
-    + 'Date: ' + dateLabel + '\n'
-    + 'Season: ' + seasonInfo + '\n'
-    + 'Weather today: ' + weatherEN + ' (max ' + max + 'C)\n'
-    + 'Weather penalty: subtract ' + penalty + '% from each score.\n\n'
-    + 'Return ONLY this JSON format, no markdown:\n'
-    + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":65},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":58},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":52},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":45},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":38}],"memo":"One short sentence under 15 words"}';
-  const raw = await callGemini(apiKey, prompt);
-  const clean = raw.replace(/```json|```/g, '').trim();
-  const match = clean.match(/\{[\s\S]*\}/);
+  let parsed = null;
+  try {
+    const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
+      + 'Date: ' + dateLabel + '\n'
+      + 'Season: ' + seasonInfo + '\n'
+      + 'Weather today: ' + weatherEN + ' (max ' + max + 'C)\n'
+      + 'Weather penalty: subtract ' + penalty + '% from each score.\n\n'
+      + 'Return ONLY this JSON format, no markdown:\n'
+      + '{"spots":[{"name":"Hitachi Seaside Park, Ibaraki","emoji":"🌼","score":65},{"name":"Ashikaga Flower Park, Tochigi","emoji":"🌸","score":58},{"name":"Showa Memorial Park, Tokyo","emoji":"🌷","score":52},{"name":"Musashino Forest Park, Saitama","emoji":"🌿","score":45},{"name":"Yokohama Park, Kanagawa","emoji":"🌺","score":38}],"memo":"One short sentence under 15 words"}';
+    const raw = await callGemini(apiKey, prompt);
+    parsed = safeParseJson(raw);
+  } catch { parsed = null; }
+
   let spots, memo;
-  if (match) {
-    const parsed = JSON.parse(match[0]);
+  if (parsed && parsed.spots) {
     spots = parsed.spots;
-    memo = parsed.memo;
+    memo = parsed.memo || 'Flowers in season across Kanto.';
   } else {
     spots = [
       { name: 'Hitachi Seaside Park, Ibaraki', emoji: '🌼', score: Math.max(10, 95 - penalty) },
@@ -254,13 +271,19 @@ async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
     + (holiday ? '・' + holiday : '')
     + '・' + rokuyo + senjiText;
   const hashtag = '#開運 #お出かけ #' + (senjiList[0] || rokuyo);
-  const actionPrompt = 'Output only the final answer in Japanese. No thinking, no explanation, no reasoning.\n'
-    + 'お出かけを促す開運アクションを1文で書いてください。\n'
-    + '六曜：' + rokuyo + '\n'
-    + '天気：東京' + weatherJA + '（最高' + max + '℃）\n'
-    + '選日：' + (senjiText || 'なし') + '\n'
-    + '条件：30文字以内、前向きな内容、文章のみ出力';
-  const action = await callGemini(apiKey, actionPrompt, 100);
+
+  let action = '今日も良い一日を！';
+  try {
+    const actionPrompt = 'Output only the final answer in Japanese. No thinking, no explanation, no reasoning.\n'
+      + 'お出かけを促す開運アクションを1文で書いてください。\n'
+      + '六曜：' + rokuyo + '\n'
+      + '天気：東京' + weatherJA + '（最高' + max + '℃）\n'
+      + '選日：' + (senjiText || 'なし') + '\n'
+      + '条件：30文字以内、前向きな内容、文章のみ出力';
+    action = await callGemini(apiKey, actionPrompt, 100);
+    action = action.replace(/\n/g, '');
+  } catch { /* フォールバック文を使用 */ }
+
   return '⛩️お出かけ指数' + outing + '％ '
     + dateText + ' '
     + '東京' + weatherJA + '（最高' + max + '℃）'
@@ -269,22 +292,49 @@ async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
 }
 
 export async function GET(request) {
-  　const authHeader = request.headers.get('authorization');
-  　if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
-  　  return new Response('Unauthorized', { status: 401 });
-  　}
+  const authHeader = request.headers.get('authorization');
+  if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const report = { instagram: {}, x: {}, weather: null };
+
   try {
+    // ============================================
+    // ステップ1：Instagram投稿（最優先・完全に待つ）
+    // ============================================
+    const proto = request.headers.get('x-forwarded-proto') || 'https';
+    const host = request.headers.get('host');
+    const baseUrl = proto + '://' + host;
+
+    for (const path of ['/api/post-instagram', '/api/post-jake-images']) {
+      try {
+        const igRes = await fetch(baseUrl + path, {
+          headers: { 'authorization': 'Bearer ' + process.env.CRON_SECRET }
+        });
+        let body = '';
+        try { body = (await igRes.text()).slice(0, 200); } catch {}
+        report.instagram[path] = { status: igRes.status, body };
+      } catch (err) {
+        report.instagram[path] = { status: 'fetch_error', body: err.message };
+      }
+    }
+
+    // ============================================
+    // ステップ2：X投稿（3本）
+    // ============================================
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
     const dateLabelEN = getTodayLabelEN();
     const sakura      = isSakuraSeason();
     const flowers     = getSeasonalFlowers();
     const flowersEN   = getSeasonalFlowersEN();
-    const { weatherJA, weatherEN, penalty, scoreWeather, max } = await getDaytimeWeather();
+    const weather     = await getDaytimeWeather();
+    report.weather = weather.weatherJA;
 
-    const tweetEN    = await buildFlowerTweetEN(API_KEY, dateLabelEN, sakura, flowersEN, weatherEN, penalty, max);
-    const tweetLucky = await buildLuckyTweet(API_KEY, weatherJA, scoreWeather, max);
-    const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weatherJA, penalty, max);
+    const tweetEN    = await buildFlowerTweetEN(API_KEY, dateLabelEN, sakura, flowersEN, weather.weatherEN, weather.penalty, weather.max);
+    const tweetLucky = await buildLuckyTweet(API_KEY, weather.weatherJA, weather.scoreWeather, weather.max);
+    const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weather.weatherJA, weather.penalty, weather.max);
 
     const xClient = new TwitterApi({
       appKey:       process.env.X_API_KEY,
@@ -293,7 +343,6 @@ export async function GET(request) {
       accessSecret: process.env.X_ACCESS_SECRET,
     });
 
-    const results = {};
     for (const [key, text] of [
       ['flower_en', tweetEN],
       ['lucky',     tweetLucky],
@@ -301,31 +350,15 @@ export async function GET(request) {
     ]) {
       try {
         await xClient.v2.tweet(text);
-        results[key] = { ok: true };
+        report.x[key] = 'ok';
       } catch (err) {
-        results[key] = { ok: false, error: err.message };
+        report.x[key] = 'error: ' + err.message;
       }
-      await new Promise(r => setTimeout(r, 10000));
+      await new Promise(r => setTimeout(r, 5000));
     }
 
-    // Instagram投稿を内部呼び出し（motion → jake の順）
-    const proto = request.headers.get('x-forwarded-proto') || 'https';
-    const host = request.headers.get('host');
-    const baseUrl = proto + '://' + host;
-
-    const igResults = {};
-    for (const path of ['/api/post-instagram', '/api/post-jake-images']) {
-      fetch(baseUrl + path, {
-        headers: { 'authorization': 'Bearer ' + process.env.CRON_SECRET }
-      }).catch(() => {});
-      igResults[path] = 'triggered';
-    }
-    await new Promise(r => setTimeout(r, 2000));
-
-
-
-    return new Response(JSON.stringify({ message: 'Success', results, igResults, weatherJA, penalty, max }), { status: 200 });
+    return new Response(JSON.stringify({ message: 'Done', report }), { status: 200 });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: error.message, report }), { status: 500 });
   }
 }
