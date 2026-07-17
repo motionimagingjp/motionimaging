@@ -2,6 +2,7 @@
 // @motion.imaging 専用 Instagram自動投稿
 import { Redis } from '@upstash/redis';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL,
@@ -336,6 +337,56 @@ ${FIXED_COMMENT}
   return await callGemini(process.env.GEMINI_API_KEY, prompt);
 }
 
+// ============================================================
+// Threads投稿（500字制限・ベストエフォート）
+// ============================================================
+// Instagramキャプションの「おいしい部分」だけ残して500字以内にする
+function buildThreadsText(fullCaption) {
+  // フッター（───区切り）以降＝固定コメント等を除去
+  let t = fullCaption.split('─')[0].trim();
+  if (t.length > 500) t = t.slice(0, 497).trim() + '…';
+  return t;
+}
+
+async function getThreadsUserId(token) {
+  const r = await fetch(`https://graph.threads.net/v1.0/me?fields=id&access_token=${token}`);
+  const d = await r.json();
+  if (d.error) throw new Error('Threads me error: ' + d.error.message);
+  return d.id;
+}
+
+async function postToThreads(token, imageUrl, text) {
+  if (!token) { console.log('ℹ️ Threads token未設定 → スキップ'); return null; }
+  const userId = await getThreadsUserId(token);
+
+  // 1) メディアコンテナ作成
+  const cRes = await fetch(`https://graph.threads.net/v1.0/${userId}/threads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ media_type: 'IMAGE', image_url: imageUrl, text, access_token: token }),
+  });
+  const cData = await cRes.json();
+  if (cData.error) throw new Error('Threads Container Error: ' + cData.error.message);
+
+  // 2) 公開（メディア処理待ち→失敗時は5秒待って1回リトライ）
+  async function publish() {
+    const pRes = await fetch(`https://graph.threads.net/v1.0/${userId}/threads_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creation_id: cData.id, access_token: token }),
+    });
+    return pRes.json();
+  }
+  await new Promise(r => setTimeout(r, 5000));
+  let pData = await publish();
+  if (pData.error) {
+    await new Promise(r => setTimeout(r, 5000));
+    pData = await publish();
+  }
+  if (pData.error) throw new Error('Threads Publish Error: ' + pData.error.message);
+  return pData.id;
+}
+
 async function postToInstagram(imageUrl, caption) {
   const igAccountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
   const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
@@ -430,6 +481,15 @@ export async function GET(request) {
 
     console.log(`✅ motion.imaging posted: ${folderKey} ${String(imageIndex).padStart(2,'0')}.jpg`);
 
+    // Threads同時投稿（同じ画像・500字トリム。失敗してもIGには影響しない）
+    let threadsId = null;
+    try {
+      threadsId = await postToThreads(process.env.THREADS_MOTION_TOKEN, imageUrl, buildThreadsText(caption));
+      if (threadsId) console.log(`✅ Threads(motion) posted: ${threadsId}`);
+    } catch (e) {
+      console.error('Threads(motion) failed:', e.message);
+    }
+
     return new Response(JSON.stringify({
       message: 'Success',
       folder: folderKey,
@@ -437,6 +497,7 @@ export async function GET(request) {
       imageUrl,
       caption,
       postId,
+      threadsId,
     }), { status: 200 });
 
   } catch (error) {

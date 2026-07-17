@@ -2,6 +2,7 @@
 // @jake_images_ 専用 Instagram自動投稿
 import { Redis } from '@upstash/redis';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL,
@@ -228,6 +229,53 @@ ${FIXED_COMMENT}
 }
 
 // ============================================================
+// Threads投稿（500字制限・ベストエフォート）
+// ============================================================
+function buildThreadsText(fullCaption) {
+  // フッター（───区切り）以降＝固定コメント等を除去
+  let t = fullCaption.split('─')[0].trim();
+  if (t.length > 500) t = t.slice(0, 497).trim() + '…';
+  return t;
+}
+
+async function getThreadsUserId(token) {
+  const r = await fetch(`https://graph.threads.net/v1.0/me?fields=id&access_token=${token}`);
+  const d = await r.json();
+  if (d.error) throw new Error('Threads me error: ' + d.error.message);
+  return d.id;
+}
+
+async function postToThreads(token, imageUrl, text) {
+  if (!token) { console.log('ℹ️ Threads token未設定 → スキップ'); return null; }
+  const userId = await getThreadsUserId(token);
+
+  const cRes = await fetch(`https://graph.threads.net/v1.0/${userId}/threads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ media_type: 'IMAGE', image_url: imageUrl, text, access_token: token }),
+  });
+  const cData = await cRes.json();
+  if (cData.error) throw new Error('Threads Container Error: ' + cData.error.message);
+
+  async function publish() {
+    const pRes = await fetch(`https://graph.threads.net/v1.0/${userId}/threads_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creation_id: cData.id, access_token: token }),
+    });
+    return pRes.json();
+  }
+  await new Promise(r => setTimeout(r, 5000));
+  let pData = await publish();
+  if (pData.error) {
+    await new Promise(r => setTimeout(r, 5000));
+    pData = await publish();
+  }
+  if (pData.error) throw new Error('Threads Publish Error: ' + pData.error.message);
+  return pData.id;
+}
+
+// ============================================================
 // メインハンドラー
 // ============================================================
 
@@ -293,12 +341,22 @@ export async function GET(request) {
 
     console.log(`✅ jake_images_ posted: ${imageNum}.jpg postId=${pData.id}`);
 
+    // Threads同時投稿（同じ画像・500字トリム。失敗してもIGには影響しない）
+    let threadsId = null;
+    try {
+      threadsId = await postToThreads(process.env.THREADS_JAKE_TOKEN, imageUrl, buildThreadsText(caption));
+      if (threadsId) console.log(`✅ Threads(jake) posted: ${threadsId}`);
+    } catch (e) {
+      console.error('Threads(jake) failed:', e.message);
+    }
+
     return new Response(JSON.stringify({
       message: 'Success',
       imageNumber: imageNum,
       imageUrl,
       caption,
       postId: pData.id,
+      threadsId,
     }), { status: 200 });
 
   } catch (error) {
