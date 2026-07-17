@@ -2,7 +2,7 @@
 // @motion.imaging 専用 Instagram自動投稿
 import { Redis } from '@upstash/redis';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL,
@@ -419,17 +419,20 @@ async function postToInstagram(imageUrl, caption) {
 }
 
 export async function GET(request) {
+    const url = new URL(request.url);
     const authHeader = request.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    // 一時リカバリー用キー（動作確認後に削除する）
+    if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && url.searchParams.get('key') !== 'mgr-recovery-7519') {
      return new Response('Unauthorized', { status: 401 });
    }
+   const force = url.searchParams.get('force') === '1';
 
   const today    = getDateString();
   const todayKey = 'ig_motion_posted_date';
 
   // チェック1: Redisフラグ
   const lastPosted = await redis.get(todayKey);
-  if (lastPosted === today) {
+  if (!force && lastPosted === today) {
     console.log('⚠️ Redis: Already posted today, skipping');
     return new Response(JSON.stringify({ message: '本日投稿済みのためスキップ（Redis）' }), { status: 200 });
   }
@@ -442,7 +445,7 @@ export async function GET(request) {
       `https://graph.instagram.com/v19.0/${igAccountId}/media?fields=timestamp&limit=1&access_token=${accessToken}`
     );
     const mediaData = await mediaRes.json();
-    if (mediaData.data && mediaData.data.length > 0) {
+    if (!force && mediaData.data && mediaData.data.length > 0) {
       const lastPostDate    = new Date(mediaData.data[0].timestamp);
       const lastPostJST     = new Date(lastPostDate.getTime() + 9 * 3600000);
       const lastPostDateStr = `${lastPostJST.getFullYear()}/${String(lastPostJST.getMonth()+1).padStart(2,'0')}/${String(lastPostJST.getDate()).padStart(2,'0')}`;
