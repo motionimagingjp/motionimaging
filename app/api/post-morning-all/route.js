@@ -242,14 +242,22 @@ async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN,
     memo = weatherEN + ' conditions today.';
   }
   const ranked = spots.sort((a, b) => b.score - a.score);
-  let tweet = '🌸 Kanto Bloom Report — ' + dateLabel + '\n';
-  let rank = 1;
-  for (const s of ranked) {
-    tweet += rank + '. ' + s.name + ' — ' + s.score + '%\n';
-    rank++;
-  }
-  tweet += 'Note: ' + memo + '\n';
-  tweet += '#JapanFlowers #LandscapePhotography #Migoron';
+  // 280字制限対策：名前・メモを段階的に短縮して必ず収める
+  const clip = (s, n) => { s = String(s); return s.length > n ? s.slice(0, n - 1).trim() + '…' : s; };
+  const build = (nameLen, withMemo) => {
+    let t = '🌸 Kanto Bloom Report — ' + dateLabel + '\n';
+    let rank = 1;
+    for (const s of ranked) {
+      t += rank + '. ' + clip(s.name, nameLen) + ' — ' + s.score + '%\n';
+      rank++;
+    }
+    if (withMemo) t += 'Note: ' + clip(memo, 60) + '\n';
+    t += '#JapanFlowers #LandscapePhotography #Migoron';
+    return t;
+  };
+  let tweet = build(34, true);
+  if (tweet.length > 275) tweet = build(28, true);
+  if (tweet.length > 275) tweet = build(24, false);
   return tweet;
 }
 
