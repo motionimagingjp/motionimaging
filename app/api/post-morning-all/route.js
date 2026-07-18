@@ -308,8 +308,7 @@ async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
 export async function GET(request) {
    const url = new URL(request.url);
    const authHeader = request.headers.get('authorization');
-   // 一時デバッグ用キー（調査完了後に削除する）
-   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET && url.searchParams.get('key') !== 'mgr-debug-7519') {
+   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
      return new Response('Unauthorized', { status: 401 });
    }
   // skip=lucky,flower_en 等でX投稿を個別スキップ（再実行時の重複防止用）
