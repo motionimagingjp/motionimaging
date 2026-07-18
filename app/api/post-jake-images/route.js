@@ -280,20 +280,17 @@ async function postToThreads(token, imageUrl, text) {
 // ============================================================
 
 export async function GET(request) {
- const url = new URL(request.url);
  const authHeader = request.headers.get('authorization');
-   // 一時リカバリー用キー（動作確認後に削除する）
-   if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && url.searchParams.get('key') !== 'mgr-recovery-7519') {
+   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
      return new Response('Unauthorized', { status: 401 });
    }
-   const force = url.searchParams.get('force') === '1';
 
   // 2重投稿防止
   const today      = getDateString();
   const todayKey   = 'ig_jake_posted_date';
   const lastPosted = await redis.get(todayKey);
 
-  if (!force && lastPosted === today) {
+  if (lastPosted === today) {
     console.log('⚠️ Jake already posted today, skipping');
     return new Response(JSON.stringify({ message: '本日投稿済みのためスキップ' }), { status: 200 });
   }
