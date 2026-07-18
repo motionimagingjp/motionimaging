@@ -368,7 +368,9 @@ export async function GET(request) {
         await xClient.v2.tweet(text);
         report.x[key] = 'ok';
       } catch (err) {
-        report.x[key] = 'error: ' + err.message;
+        // Xの詳細エラー（duplicate等）とツイート文字数も記録
+        const detail = err && err.data ? JSON.stringify(err.data).slice(0, 300) : '';
+        report.x[key] = 'error: ' + err.message + (detail ? ' | detail: ' + detail : '') + ' | len:' + text.length;
       }
       await new Promise(r => setTimeout(r, 5000));
     }
