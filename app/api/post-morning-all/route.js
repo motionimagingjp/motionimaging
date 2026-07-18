@@ -1,6 +1,12 @@
 import { TwitterApi } from 'twitter-api-v2';
+import { Redis } from '@upstash/redis';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
+
+const redis = new Redis({
+  url: process.env.KV_REST_API_URL,
+  token: process.env.KV_REST_API_TOKEN,
+});
 
 function getTodayLabel() {
   const jst = new Date(Date.now() + 9 * 3600000);
@@ -292,12 +298,16 @@ async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
 }
 
 export async function GET(request) {
+   const url = new URL(request.url);
    const authHeader = request.headers.get('authorization');
-   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
+   // 一時デバッグ用キー（調査完了後に削除する）
+   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET && url.searchParams.get('key') !== 'mgr-debug-7519') {
      return new Response('Unauthorized', { status: 401 });
    }
+  // skip=lucky,flower_en 等でX投稿を個別スキップ（再実行時の重複防止用）
+  const skipList = (url.searchParams.get('skip') || '').split(',').filter(Boolean);
 
-  const report = { instagram: {}, x: {}, weather: null };
+  const report = { instagram: {}, x: {}, weather: null, startedAt: new Date().toISOString() };
 
   try {
     // ============================================
@@ -307,18 +317,23 @@ export async function GET(request) {
     const host = request.headers.get('host');
     const baseUrl = proto + '://' + host;
 
-    for (const path of ['/api/post-instagram', '/api/post-jake-images']) {
+    // 2アカウント並列実行・各120秒で待ち切り（IG関数自体は切断後も裏で完走する）
+    await Promise.all(['/api/post-instagram', '/api/post-jake-images'].map(async (path) => {
       try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120000);
         const igRes = await fetch(baseUrl + path, {
-          headers: { 'authorization': 'Bearer ' + process.env.CRON_SECRET }
+          headers: { 'authorization': 'Bearer ' + process.env.CRON_SECRET },
+          signal: controller.signal,
         });
+        clearTimeout(timer);
         let body = '';
-        try { body = (await igRes.text()).slice(0, 200); } catch {}
+        try { body = (await igRes.text()).slice(0, 300); } catch {}
         report.instagram[path] = { status: igRes.status, body };
       } catch (err) {
         report.instagram[path] = { status: 'fetch_error', body: err.message };
       }
-    }
+    }));
 
     // ============================================
     // ステップ2：X投稿（3本）
@@ -348,6 +363,7 @@ export async function GET(request) {
       ['lucky',     tweetLucky],
       ['flower_ja', tweetJA],
     ]) {
+      if (skipList.includes(key)) { report.x[key] = 'skipped'; continue; }
       try {
         await xClient.v2.tweet(text);
         report.x[key] = 'ok';
@@ -357,8 +373,12 @@ export async function GET(request) {
       await new Promise(r => setTimeout(r, 5000));
     }
 
+    report.finishedAt = new Date().toISOString();
+    try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ message: 'Done', report }), { status: 200 });
   } catch (error) {
+    report.fatalError = error.message;
+    try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ error: error.message, report }), { status: 500 });
   }
 }
