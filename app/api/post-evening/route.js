@@ -43,6 +43,28 @@ async function callGemini(apiKey, prompt) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
+// X投稿と同じ文面を @motion.imaging のThreadsへテキスト投稿（画像なし・ベストエフォート）
+async function postTextToThreads(token, text) {
+  if (!token) return null;
+  const meRes = await fetch('https://graph.threads.net/v1.0/me?fields=id&access_token=' + token);
+  const me = await meRes.json();
+  if (me.error) throw new Error('Threads me: ' + me.error.message);
+  const cRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ media_type: 'TEXT', text, access_token: token }),
+  });
+  const c = await cRes.json();
+  if (c.error) throw new Error('Threads container: ' + c.error.message);
+  await new Promise(r => setTimeout(r, 2000));
+  const pRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads_publish', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creation_id: c.id, access_token: token }),
+  });
+  const p = await pRes.json();
+  if (p.error) throw new Error('Threads publish: ' + p.error.message);
+  return p.id;
+}
+
 export async function GET(request) {
   const authHeader = request.headers.get('authorization');
   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
@@ -103,7 +125,15 @@ export async function GET(request) {
 
     await xClient.v2.tweet(tweet);
 
-    return new Response(JSON.stringify({ message: 'Success', tweet, moonAge: moon }), { status: 200 });
+    // 同じ文面を @motion.imaging のThreadsへ（ベストエフォート）
+    let threads = 'ok';
+    try {
+      await postTextToThreads(process.env.THREADS_MOTION_TOKEN, tweet);
+    } catch (te) {
+      threads = 'error: ' + te.message;
+    }
+
+    return new Response(JSON.stringify({ message: 'Success', tweet, moonAge: moon, threads }), { status: 200 });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }

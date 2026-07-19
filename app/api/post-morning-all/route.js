@@ -305,6 +305,28 @@ async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
     + hashtag;
 }
 
+// X投稿と同じ文面を @motion.imaging のThreadsへテキスト投稿（画像なし・ベストエフォート）
+async function postTextToThreads(token, text) {
+  if (!token) return null;
+  const meRes = await fetch('https://graph.threads.net/v1.0/me?fields=id&access_token=' + token);
+  const me = await meRes.json();
+  if (me.error) throw new Error('Threads me: ' + me.error.message);
+  const cRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ media_type: 'TEXT', text, access_token: token }),
+  });
+  const c = await cRes.json();
+  if (c.error) throw new Error('Threads container: ' + c.error.message);
+  await new Promise(r => setTimeout(r, 2000));
+  const pRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads_publish', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creation_id: c.id, access_token: token }),
+  });
+  const p = await pRes.json();
+  if (p.error) throw new Error('Threads publish: ' + p.error.message);
+  return p.id;
+}
+
 export async function GET(request) {
    const url = new URL(request.url);
    const authHeader = request.headers.get('authorization');
@@ -378,6 +400,14 @@ export async function GET(request) {
         // Xの詳細エラー（duplicate等）とツイート文字数も記録
         const detail = err && err.data ? JSON.stringify(err.data).slice(0, 300) : '';
         report.x[key] = 'error: ' + err.message + (detail ? ' | detail: ' + detail : '') + ' | len:' + text.length;
+      }
+      // 同じ文面を @motion.imaging のThreadsへ（ベストエフォート・Xの成否に関わらず試行）
+      report.threads = report.threads || {};
+      try {
+        await postTextToThreads(process.env.THREADS_MOTION_TOKEN, text);
+        report.threads[key] = 'ok';
+      } catch (te) {
+        report.threads[key] = 'error: ' + te.message;
       }
       await new Promise(r => setTimeout(r, 5000));
     }
