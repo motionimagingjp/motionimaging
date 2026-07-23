@@ -1,8 +1,26 @@
 // app/api/post-jake-images/route.js
 // @jake_images_ 専用 Instagram自動投稿
+// ============================================================
+// 2026-07-23 修正版（post-instagram と同じ対策を適用）
+//  1. Graph API を v19.0 → v23.0 に更新
+//  2. base64変換を Buffer に置換（数十秒 → 1秒未満）／4MB超はVisionスキップ
+//  3. 起動時に環境変数チェック＋トークン検証
+//  4. 画像URLをHEADで事前確認
+//  5. 公開は status_code ポーリング＋リトライ
+//  6. Metaエラー詳細（code / error_subcode / fbtrace_id）を全て返す
+//  7. exif.csv の取得失敗を致命的にしない（空EXIFで続行）
+//  8. Instagram API側の重複チェックを追加（motion側と同等に）
+//  9. ?key=CRON_SECRET でブラウザから直接デバッグ可能
+// 10. ?force=1 で重複チェックをスキップ（テスト用）
+// ※ Redisフラグは元から投稿成功後に更新されているため順序変更なし
+// ============================================================
 import { Redis } from '@upstash/redis';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
+
+const IG_API_VERSION = 'v23.0';
+const IG_BASE = `https://graph.instagram.com/${IG_API_VERSION}`;
+const MAX_VISION_BYTES = 4 * 1024 * 1024; // これを超える画像はGemini Visionに送らない
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL,
@@ -63,6 +81,76 @@ function buildImageUrl(index) {
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${JAKE_FOLDER_PATH}/${paddedIndex}.jpg`;
 }
 
+// ---- 環境変数チェック --------------------------------------
+function requireEnv(names) {
+  const missing = names.filter((n) => !process.env[n]);
+  if (missing.length > 0) {
+    throw new Error('環境変数が未設定です: ' + missing.join(', '));
+  }
+}
+
+// ---- Meta APIエラーを詳細に整形 ------------------------------
+async function metaFetch(url, options) {
+  const res = await fetch(url, options);
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { _raw: text.slice(0, 400) };
+  }
+  return { ok: res.ok, status: res.status, json };
+}
+
+function formatMetaError(prefix, status, json) {
+  const e = json && json.error ? json.error : null;
+  if (e) {
+    return `${prefix} [HTTP ${status}] ${e.message}`
+      + ` (code=${e.code ?? '-'}`
+      + `, subcode=${e.error_subcode ?? '-'}`
+      + `, type=${e.type ?? '-'}`
+      + `, fbtrace=${e.fbtrace_id ?? '-'})`;
+  }
+  return `${prefix} [HTTP ${status}] ${JSON.stringify(json).slice(0, 400)}`;
+}
+
+// ---- 画像の実在確認とサイズ取得 ------------------------------
+async function checkImage(imageUrl) {
+  let res;
+  try {
+    res = await fetch(imageUrl, { method: 'HEAD' });
+  } catch (e) {
+    throw new Error(`画像URLへの接続に失敗: ${e.message} / ${imageUrl}`);
+  }
+  if (!res.ok) {
+    throw new Error(`画像URLにアクセスできません [HTTP ${res.status}] ${imageUrl}`);
+  }
+  const size = parseInt(res.headers.get('content-length') || '0', 10);
+  return { size };
+}
+
+// ---- base64変換（高速版）------------------------------------
+function toBase64(arrayBuffer) {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(arrayBuffer).toString('base64');
+  }
+  // フォールバック：32KBずつチャンク処理
+  const bytes = new Uint8Array(arrayBuffer);
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function imageUrlToBase64(imageUrl) {
+  const res = await fetch(imageUrl);
+  if (!res.ok) throw new Error(`Image fetch failed: ${res.status}`);
+  const buffer = await res.arrayBuffer();
+  return toBase64(buffer);
+}
+
 // ============================================================
 // API呼び出し
 // ============================================================
@@ -114,18 +202,6 @@ async function callGeminiWithImage(apiKey, imageBase64, textPrompt) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim().toLowerCase();
 }
 
-async function imageUrlToBase64(imageUrl) {
-  const res = await fetch(imageUrl);
-  if (!res.ok) throw new Error(`Image fetch failed: ${res.status}`);
-  const buffer = await res.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
 // ============================================================
 // CSV読み込み
 // ============================================================
@@ -136,7 +212,7 @@ async function fetchExifCSV() {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const url    = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${JAKE_FOLDER_PATH}/exif.csv`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`CSV fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`CSV fetch failed: ${res.status} / ${url}`);
   return parseCSV(await res.text());
 }
 
@@ -153,7 +229,13 @@ function parseCSV(text) {
 // テーマ判別
 // ============================================================
 
-async function detectJakeTheme(imageUrl) {
+async function detectJakeTheme(imageUrl, imageSize) {
+  // 巨大画像はVisionに送らない（タイムアウト防止）
+  if (imageSize > MAX_VISION_BYTES) {
+    console.log(`⚠️ 画像が大きいためVisionをスキップ (${Math.round(imageSize / 1024 / 1024)}MB)`);
+    return { themeInfo: JAKE_THEME_INFO['other'], theme: 'skipped(size)' };
+  }
+
   try {
     const base64 = await imageUrlToBase64(imageUrl);
     const theme  = await callGeminiWithImage(
@@ -175,14 +257,14 @@ async function detectJakeTheme(imageUrl) {
         process.env.GEMINI_API_KEY,
         `ポートレート写真に${flowerName}が写っています。${flowerName}とポートレート撮影の魅力について、インスタグラムのキャプション用に2〜3文で日本語で書いてください。絵文字を1つ使って始めてください。`
       );
-      return flowerInfo;
+      return { themeInfo: flowerInfo, theme: `${theme}/${flowerName}` };
     }
 
     const key = Object.keys(JAKE_THEME_INFO).find(k => theme.includes(k)) || 'other';
-    return JAKE_THEME_INFO[key];
+    return { themeInfo: JAKE_THEME_INFO[key], theme: key };
   } catch (e) {
     console.error('Jake theme detection failed:', e.message);
-    return JAKE_THEME_INFO['other'];
+    return { themeInfo: JAKE_THEME_INFO['other'], theme: 'fallback: ' + e.message };
   }
 }
 
@@ -276,78 +358,205 @@ async function postToThreads(token, imageUrl, text) {
 }
 
 // ============================================================
+// Instagram投稿（トークン検証＋ポーリング公開）
+// ============================================================
+async function verifyToken(accessToken) {
+  const { status, json } = await metaFetch(
+    `${IG_BASE}/me?fields=id,username&access_token=${encodeURIComponent(accessToken)}`
+  );
+  if (json && json.error) {
+    throw new Error(formatMetaError('トークンが無効です', status, json));
+  }
+  console.log(`🔑 Token OK: @${json.username} (id=${json.id})`);
+  return json;
+}
+
+// コンテナが公開可能になるまで待つ（最大90秒）
+async function waitForContainer(creationId, accessToken) {
+  const start = Date.now();
+  let last = 'UNKNOWN';
+  while (Date.now() - start < 90000) {
+    const { status, json } = await metaFetch(
+      `${IG_BASE}/${creationId}?fields=status_code,status&access_token=${encodeURIComponent(accessToken)}`
+    );
+    if (json && json.error) {
+      throw new Error(formatMetaError('Container Status Error', status, json));
+    }
+    last = json.status_code || 'UNKNOWN';
+    console.log(`⏳ container status: ${last}`);
+    if (last === 'FINISHED') return;
+    if (last === 'ERROR' || last === 'EXPIRED') {
+      throw new Error(`Container失敗: status_code=${last} detail=${String(json.status || '').slice(0, 200)}`);
+    }
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  throw new Error(`Containerタイムアウト: 最終status_code=${last}`);
+}
+
+async function postToInstagram(imageUrl, caption) {
+  const igId    = process.env.JAKE_IMAGES_ACCOUNT_ID;
+  const igToken = process.env.JAKE_IMAGES_ACCESS_TOKEN;
+
+  // 1) コンテナ作成
+  const c = await metaFetch(`${IG_BASE}/${igId}/media`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_url: imageUrl, caption, access_token: igToken }),
+  });
+  if (c.json && c.json.error) {
+    throw new Error(formatMetaError('Container Error', c.status, c.json));
+  }
+  const creationId = c.json.id;
+  if (!creationId) {
+    throw new Error(`Container Error: idが返りません ${JSON.stringify(c.json).slice(0, 300)}`);
+  }
+
+  // 2) 処理完了を待つ
+  await waitForContainer(creationId, igToken);
+
+  // 3) 公開（失敗時は5秒待って2回までリトライ）
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const p = await metaFetch(`${IG_BASE}/${igId}/media_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creation_id: creationId, access_token: igToken }),
+    });
+    if (p.json && p.json.error) {
+      lastErr = formatMetaError(`Publish Error (試行${attempt}/3)`, p.status, p.json);
+      console.error(lastErr);
+      if (attempt < 3) { await new Promise(r => setTimeout(r, 5000)); continue; }
+      throw new Error(lastErr);
+    }
+    return p.json.id;
+  }
+  throw new Error(lastErr || 'Publish Error: 原因不明');
+}
+
+// ============================================================
 // メインハンドラー
 // ============================================================
 
 export async function GET(request) {
- const authHeader = request.headers.get('authorization');
-   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-     return new Response('Unauthorized', { status: 401 });
-   }
+  const url = new URL(request.url);
 
-  // 2重投稿防止
-  const today      = getDateString();
-  const todayKey   = 'ig_jake_posted_date';
-  const lastPosted = await redis.get(todayKey);
-
-  if (lastPosted === today) {
-    console.log('⚠️ Jake already posted today, skipping');
-    return new Response(JSON.stringify({ message: '本日投稿済みのためスキップ' }), { status: 200 });
+  // 認証：Authorizationヘッダー または ?key= のどちらでもOK
+  const authHeader = request.headers.get('authorization');
+  const keyParam   = url.searchParams.get('key');
+  const authorized =
+    authHeader === `Bearer ${process.env.CRON_SECRET}` ||
+    (keyParam && keyParam === process.env.CRON_SECRET);
+  if (!authorized) {
+    return new Response('Unauthorized', { status: 401 });
   }
 
+  const force    = url.searchParams.get('force') === '1';
+  const today    = getDateString();
+  const todayKey = 'ig_jake_posted_date';
+  const debug    = { account: '@jake_images_', apiVersion: IG_API_VERSION, steps: [] };
+  const step = (name, detail) => {
+    debug.steps.push(detail ? `${name}: ${detail}` : name);
+    console.log(`▶ ${name}${detail ? ' — ' + detail : ''}`);
+  };
+
   try {
-    // 次の画像インデックス取得
+    // ---- 0) 環境変数チェック ----
+    requireEnv([
+      'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'GEMINI_API_KEY',
+      'JAKE_IMAGES_ACCESS_TOKEN', 'JAKE_IMAGES_ACCOUNT_ID',
+      'GITHUB_REPO_OWNER', 'GITHUB_REPO_NAME',
+    ]);
+    step('環境変数チェック', 'OK');
+
+    // ---- 1) トークン検証 ----
+    const me = await verifyToken(process.env.JAKE_IMAGES_ACCESS_TOKEN);
+    debug.username = me.username;
+    step('トークン検証', `@${me.username}`);
+
+    // ---- 2) 重複チェック（Redis） ----
+    if (!force) {
+      const lastPosted = await redis.get(todayKey);
+      if (lastPosted === today) {
+        step('重複チェック(Redis)', '本日投稿済み → スキップ');
+        return new Response(JSON.stringify({
+          message: '本日投稿済みのためスキップ（Redis）', debug,
+        }), { status: 200 });
+      }
+    } else {
+      step('重複チェック', 'force=1のためスキップ');
+    }
+
+    // ---- 3) 重複チェック（Instagram API） ----
+    if (!force) {
+      try {
+        const m = await metaFetch(
+          `${IG_BASE}/${process.env.JAKE_IMAGES_ACCOUNT_ID}/media?fields=timestamp&limit=1&access_token=${encodeURIComponent(process.env.JAKE_IMAGES_ACCESS_TOKEN)}`
+        );
+        if (m.json && m.json.data && m.json.data.length > 0) {
+          const lastPostDate    = new Date(m.json.data[0].timestamp);
+          const lastPostJST     = new Date(lastPostDate.getTime() + 9 * 3600000);
+          const lastPostDateStr = `${lastPostJST.getFullYear()}/${String(lastPostJST.getMonth() + 1).padStart(2, '0')}/${String(lastPostJST.getDate()).padStart(2, '0')}`;
+          if (lastPostDateStr === today) {
+            await redis.set(todayKey, today, { ex: 82800 });
+            step('重複チェック(IG API)', '本日投稿済み → スキップ');
+            return new Response(JSON.stringify({
+              message: '本日投稿済みのためスキップ（Instagram API）', debug,
+            }), { status: 200 });
+          }
+        }
+        step('重複チェック(IG API)', 'OK');
+      } catch (e) {
+        step('重複チェック(IG API)', '確認失敗（続行）: ' + e.message);
+      }
+    }
+
+    // ---- 4) 次の画像インデックス取得 ----
     let current = await redis.get(JAKE_REDIS_KEY);
     if (current === null || current === undefined) current = -1;
     const nextIndex = (parseInt(current) + 1) % JAKE_IMAGE_COUNT;
     const imageNum  = String(nextIndex + 1).padStart(2, '0');
     const imageUrl  = buildImageUrl(nextIndex + 1);
+    debug.imageUrl = imageUrl;
 
-    // EXIF取得
-    const rows = await fetchExifCSV();
-    const exif = rows.find(r => (r.FileName || '') === `${imageNum}.jpg`) || {};
+    const { size } = await checkImage(imageUrl);
+    step('画像確認', `${imageUrl} (${Math.round(size / 1024)}KB)`);
 
-    // テーマ判別
-    const themeInfo = await detectJakeTheme(imageUrl);
+    // ---- 5) EXIF取得（失敗しても続行） ----
+    let exif = {};
+    try {
+      const rows = await fetchExifCSV();
+      exif = rows.find(r => (r.FileName || '') === `${imageNum}.jpg`) || {};
+      step('EXIF取得', Object.keys(exif).length > 0 ? `${imageNum}.jpg のデータあり` : `${imageNum}.jpg の行が見つからず（?で出力）`);
+    } catch (e) {
+      step('EXIF取得', '失敗（?で続行）: ' + e.message);
+    }
 
-    // キャプション生成
+    // ---- 6) テーマ判別 ----
+    const { themeInfo, theme } = await detectJakeTheme(imageUrl, size);
+    step('テーマ判別', theme);
+
+    // ---- 7) キャプション生成 ----
     const caption = await generateCaption(exif, themeInfo, imageNum);
+    step('キャプション生成', `${caption.length}文字`);
 
-    // Instagram投稿
-    const igId    = process.env.JAKE_IMAGES_ACCOUNT_ID;
-    const igToken = process.env.JAKE_IMAGES_ACCESS_TOKEN;
+    // ---- 8) Instagram投稿 ----
+    const postId = await postToInstagram(imageUrl, caption);
+    step('Instagram投稿', `成功 postId=${postId}`);
 
-    const cRes = await fetch(`https://graph.instagram.com/v19.0/${igId}/media`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_url: imageUrl, caption, access_token: igToken })
-    });
-    const cData = await cRes.json();
-    if (cData.error) throw new Error('Container Error: ' + cData.error.message);
-
-    await new Promise(r => setTimeout(r, 3000));
-
-    const pRes = await fetch(`https://graph.instagram.com/v19.0/${igId}/media_publish`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ creation_id: cData.id, access_token: igToken })
-    });
-    const pData = await pRes.json();
-    if (pData.error) throw new Error('Publish Error: ' + pData.error.message);
-
-    // Redis更新
+    // ---- 9) 成功後にフラグとインデックスを確定 ----
     await redis.set(JAKE_REDIS_KEY, nextIndex);
-    await redis.set(todayKey, today, { ex: 90000 });
+    await redis.set(todayKey, today, { ex: 82800 });
+    step('Redis更新', `${JAKE_REDIS_KEY}=${nextIndex}`);
 
-    console.log(`✅ jake_images_ posted: ${imageNum}.jpg postId=${pData.id}`);
+    console.log(`✅ jake_images_ posted: ${imageNum}.jpg postId=${postId}`);
 
-    // Threads同時投稿（同じ画像・500字トリム。失敗してもIGには影響しない）
+    // ---- 10) Threads（ベストエフォート） ----
     let threadsId = null;
     try {
       threadsId = await postToThreads(process.env.THREADS_JAKE_TOKEN, imageUrl, buildThreadsText(caption));
-      if (threadsId) console.log(`✅ Threads(jake) posted: ${threadsId}`);
+      if (threadsId) step('Threads投稿', `成功 ${threadsId}`);
     } catch (e) {
-      console.error('Threads(jake) failed:', e.message);
+      step('Threads投稿', '失敗（IGには影響なし）: ' + e.message);
     }
 
     return new Response(JSON.stringify({
@@ -355,12 +564,16 @@ export async function GET(request) {
       imageNumber: imageNum,
       imageUrl,
       caption,
-      postId: pData.id,
+      postId,
       threadsId,
+      debug,
     }), { status: 200 });
 
   } catch (error) {
     console.error('ERROR:', error.message, error.stack);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    return new Response(JSON.stringify({
+      error: error.message,
+      debug,
+    }), { status: 500 });
   }
 }
