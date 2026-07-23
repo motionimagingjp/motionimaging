@@ -1,12 +1,23 @@
 // app/api/post-morning-all/route.js
-// 朝6:03の統合投稿（Instagram 2アカウント → X 3投稿）
+// 朝のX投稿（3本）＋Threads
 // ============================================================
-// 2026-07-23 修正版
-//  1. Instagram呼び出しを「並列＋120秒abort」から「順次await・abortなし」に戻す
-//     （Vercelでは切断後にバックグラウンド処理は継続しない）
-//  2. ?key=CRON_SECRET でブラウザから直接デバッグ可能
-//  3. ?report=1 で前回の実行レポートだけを表示（Upstash画面不要）
-//  4. 各ステップの所要時間をレポートに記録
+// 2026-07-24 改修版
+//  ★ Instagramの内部fetch呼び出しを完全に廃止しました。
+//    Vercelのcronは2026年1月に全プラン100本まで解放されたため、
+//    Instagramは独立したcron（/api/post-instagram、/api/post-jake-images）
+//    として実行します。vercel.json を必ず差し替えてください。
+//
+//    内部fetchを廃止した理由：
+//      - Deployment Protection が有効だとサーバー間リクエストが401になる
+//      - 親子で同じ実行時間の枠を食い合う
+//      - 片方が詰まると全体を巻き込む
+//    いずれも「呼ばない」ことで構造的に消えます。
+//
+//  クエリパラメータ
+//    ?key=CRON_SECRET  … ブラウザから直接実行
+//    ?report=1         … 前回の実行レポートを表示（投稿しない）
+//    ?dry=1            … 投稿せず本文だけ生成して確認
+//    ?skip=lucky,...   … 個別スキップ
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
@@ -353,77 +364,44 @@ export async function GET(request) {
     return new Response('Unauthorized', { status: 401 });
   }
 
+  const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
+
   // ?report=1 → 前回の実行レポートを表示するだけ（投稿しない）
   if (url.searchParams.get('report') === '1') {
     try {
-      const saved = await redis.get('last_morning_report');
-      const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
-      return new Response(JSON.stringify({ lastReport: parsed }, null, 2), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      });
+      const [morning, motion, jake] = await Promise.all([
+        redis.get('last_morning_report'),
+        redis.get('ig_motion_posted_date'),
+        redis.get('ig_jake_posted_date'),
+      ]);
+      const parsed = typeof morning === 'string' ? JSON.parse(morning) : morning;
+      return new Response(JSON.stringify({
+        lastMorningReport: parsed,
+        instagramLastPosted: {
+          'motion.imaging': motion || '(記録なし)',
+          'jake_images_':   jake   || '(記録なし)',
+        },
+      }, null, 2), { status: 200, headers: jsonHeaders });
     } catch (e) {
-      return new Response(JSON.stringify({ error: 'レポート取得失敗: ' + e.message }), { status: 500 });
+      return new Response(JSON.stringify({ error: 'レポート取得失敗: ' + e.message }), { status: 500, headers: jsonHeaders });
     }
   }
 
   // skip=lucky,flower_en 等でX投稿を個別スキップ（再実行時の重複防止用）
   const skipList = (url.searchParams.get('skip') || '').split(',').filter(Boolean);
-  // ig=skip でInstagramをスキップ（X だけテストしたい時）
-  const skipIG = url.searchParams.get('ig') === 'skip';
-  // force=1 をInstagram側に伝搬（重複チェックを無視して強制投稿）
-  const forceIG = url.searchParams.get('force') === '1';
+  // dry=1 で投稿せず本文だけ生成（文字数チェック用）
+  const dryRun = url.searchParams.get('dry') === '1';
 
   const t0 = Date.now();
   const report = {
-    instagram: {},
     x: {},
     threads: {},
     weather: null,
+    dryRun,
     startedAt: new Date().toISOString(),
   };
 
   try {
-    // ============================================
-    // ステップ1：Instagram投稿（順次・完全に待つ）
-    //   ※ Vercelでは fetch を中断するとリモート処理も止まるため
-    //     AbortController は使わない。必ず最後まで await する。
-    // ============================================
-    if (skipIG) {
-      report.instagram = { skipped: 'ig=skip指定' };
-    } else {
-      const proto = request.headers.get('x-forwarded-proto') || 'https';
-      const host = request.headers.get('host');
-      const baseUrl = proto + '://' + host;
-      const query = forceIG ? '?force=1' : '';
-
-      for (const path of ['/api/post-instagram', '/api/post-jake-images']) {
-        const started = Date.now();
-        try {
-          const igRes = await fetch(baseUrl + path + query, {
-            headers: { 'authorization': 'Bearer ' + process.env.CRON_SECRET },
-          });
-          let body = '';
-          try { body = (await igRes.text()).slice(0, 1200); } catch {}
-          report.instagram[path] = {
-            status: igRes.status,
-            elapsedMs: Date.now() - started,
-            body,
-          };
-        } catch (err) {
-          report.instagram[path] = {
-            status: 'fetch_error',
-            elapsedMs: Date.now() - started,
-            body: err.message,
-          };
-        }
-      }
-    }
-    report.igFinishedMs = Date.now() - t0;
-
-    // ============================================
-    // ステップ2：X投稿（3本）
-    // ============================================
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
     const dateLabelEN = getTodayLabelEN();
@@ -436,6 +414,20 @@ export async function GET(request) {
     const tweetEN    = await buildFlowerTweetEN(API_KEY, dateLabelEN, sakura, flowersEN, weather.weatherEN, weather.penalty, weather.max);
     const tweetLucky = await buildLuckyTweet(API_KEY, weather.weatherJA, weather.scoreWeather, weather.max);
     const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weather.weatherJA, weather.penalty, weather.max);
+
+    if (dryRun) {
+      report.finishedAt = new Date().toISOString();
+      report.totalMs = Date.now() - t0;
+      return new Response(JSON.stringify({
+        message: 'Dry run（投稿していません）',
+        tweets: {
+          flower_en: { len: tweetEN.length,    text: tweetEN },
+          lucky:     { len: tweetLucky.length, text: tweetLucky },
+          flower_ja: { len: tweetJA.length,    text: tweetJA },
+        },
+        report,
+      }, null, 2), { status: 200, headers: jsonHeaders });
+    }
 
     const xClient = new TwitterApi({
       appKey:       process.env.X_API_KEY,
@@ -472,8 +464,7 @@ export async function GET(request) {
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      status: 200, headers: jsonHeaders,
     });
 
   } catch (error) {
@@ -481,8 +472,7 @@ export async function GET(request) {
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      status: 500, headers: jsonHeaders,
     });
   }
 }
