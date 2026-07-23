@@ -1,7 +1,24 @@
 {
   "crons": [
-    { "path": "/api/post-morning-all", "schedule": "3 21 * * *" },
-    { "path": "/api/post-evening",     "schedule": "5 9 * * *" },
-    { "path": "/api/post-daily",       "schedule": "15 12 * * *" }
+    {
+      "path": "/api/post-instagram",
+      "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/post-jake-images",
+      "schedule": "10 21 * * *"
+    },
+    {
+      "path": "/api/post-morning-all",
+      "schedule": "20 21 * * *"
+    },
+    {
+      "path": "/api/post-evening",
+      "schedule": "5 9 * * *"
+    },
+    {
+      "path": "/api/post-daily",
+      "schedule": "15 12 * * *"
+    }
   ]
 }
