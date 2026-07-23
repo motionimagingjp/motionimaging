@@ -1,3 +1,13 @@
+// app/api/post-morning-all/route.js
+// 朝6:03の統合投稿（Instagram 2アカウント → X 3投稿）
+// ============================================================
+// 2026-07-23 修正版
+//  1. Instagram呼び出しを「並列＋120秒abort」から「順次await・abortなし」に戻す
+//     （Vercelでは切断後にバックグラウンド処理は継続しない）
+//  2. ?key=CRON_SECRET でブラウザから直接デバッグ可能
+//  3. ?report=1 で前回の実行レポートだけを表示（Upstash画面不要）
+//  4. 各ステップの所要時間をレポートに記録
+// ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 export const dynamic = 'force-dynamic';
@@ -327,42 +337,89 @@ async function postTextToThreads(token, text) {
   return p.id;
 }
 
+// ============================================================
+// メインハンドラ
+// ============================================================
 export async function GET(request) {
-   const url = new URL(request.url);
-   const authHeader = request.headers.get('authorization');
-   if (authHeader !== 'Bearer ' + process.env.CRON_SECRET) {
-     return new Response('Unauthorized', { status: 401 });
-   }
+  const url = new URL(request.url);
+
+  // 認証：Authorizationヘッダー または ?key= のどちらでもOK
+  const authHeader = request.headers.get('authorization');
+  const keyParam   = url.searchParams.get('key');
+  const authorized =
+    authHeader === 'Bearer ' + process.env.CRON_SECRET ||
+    (keyParam && keyParam === process.env.CRON_SECRET);
+  if (!authorized) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  // ?report=1 → 前回の実行レポートを表示するだけ（投稿しない）
+  if (url.searchParams.get('report') === '1') {
+    try {
+      const saved = await redis.get('last_morning_report');
+      const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
+      return new Response(JSON.stringify({ lastReport: parsed }, null, 2), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'レポート取得失敗: ' + e.message }), { status: 500 });
+    }
+  }
+
   // skip=lucky,flower_en 等でX投稿を個別スキップ（再実行時の重複防止用）
   const skipList = (url.searchParams.get('skip') || '').split(',').filter(Boolean);
+  // ig=skip でInstagramをスキップ（X だけテストしたい時）
+  const skipIG = url.searchParams.get('ig') === 'skip';
+  // force=1 をInstagram側に伝搬（重複チェックを無視して強制投稿）
+  const forceIG = url.searchParams.get('force') === '1';
 
-  const report = { instagram: {}, x: {}, weather: null, startedAt: new Date().toISOString() };
+  const t0 = Date.now();
+  const report = {
+    instagram: {},
+    x: {},
+    threads: {},
+    weather: null,
+    startedAt: new Date().toISOString(),
+  };
 
   try {
     // ============================================
-    // ステップ1：Instagram投稿（最優先・完全に待つ）
+    // ステップ1：Instagram投稿（順次・完全に待つ）
+    //   ※ Vercelでは fetch を中断するとリモート処理も止まるため
+    //     AbortController は使わない。必ず最後まで await する。
     // ============================================
-    const proto = request.headers.get('x-forwarded-proto') || 'https';
-    const host = request.headers.get('host');
-    const baseUrl = proto + '://' + host;
+    if (skipIG) {
+      report.instagram = { skipped: 'ig=skip指定' };
+    } else {
+      const proto = request.headers.get('x-forwarded-proto') || 'https';
+      const host = request.headers.get('host');
+      const baseUrl = proto + '://' + host;
+      const query = forceIG ? '?force=1' : '';
 
-    // 2アカウント並列実行・各120秒で待ち切り（IG関数自体は切断後も裏で完走する）
-    await Promise.all(['/api/post-instagram', '/api/post-jake-images'].map(async (path) => {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 120000);
-        const igRes = await fetch(baseUrl + path, {
-          headers: { 'authorization': 'Bearer ' + process.env.CRON_SECRET },
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        let body = '';
-        try { body = (await igRes.text()).slice(0, 300); } catch {}
-        report.instagram[path] = { status: igRes.status, body };
-      } catch (err) {
-        report.instagram[path] = { status: 'fetch_error', body: err.message };
+      for (const path of ['/api/post-instagram', '/api/post-jake-images']) {
+        const started = Date.now();
+        try {
+          const igRes = await fetch(baseUrl + path + query, {
+            headers: { 'authorization': 'Bearer ' + process.env.CRON_SECRET },
+          });
+          let body = '';
+          try { body = (await igRes.text()).slice(0, 1200); } catch {}
+          report.instagram[path] = {
+            status: igRes.status,
+            elapsedMs: Date.now() - started,
+            body,
+          };
+        } catch (err) {
+          report.instagram[path] = {
+            status: 'fetch_error',
+            elapsedMs: Date.now() - started,
+            body: err.message,
+          };
+        }
       }
-    }));
+    }
+    report.igFinishedMs = Date.now() - t0;
 
     // ============================================
     // ステップ2：X投稿（3本）
@@ -402,7 +459,6 @@ export async function GET(request) {
         report.x[key] = 'error: ' + err.message + (detail ? ' | detail: ' + detail : '') + ' | len:' + text.length;
       }
       // 同じ文面を @motion.imaging のThreadsへ（ベストエフォート・Xの成否に関わらず試行）
-      report.threads = report.threads || {};
       try {
         await postTextToThreads(process.env.THREADS_MOTION_TOKEN, text);
         report.threads[key] = 'ok';
@@ -413,11 +469,20 @@ export async function GET(request) {
     }
 
     report.finishedAt = new Date().toISOString();
+    report.totalMs = Date.now() - t0;
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
-    return new Response(JSON.stringify({ message: 'Done', report }), { status: 200 });
+    return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+
   } catch (error) {
     report.fatalError = error.message;
+    report.totalMs = Date.now() - t0;
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
-    return new Response(JSON.stringify({ error: error.message, report }), { status: 500 });
+    return new Response(JSON.stringify({ error: error.message, report }, null, 2), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
   }
 }
