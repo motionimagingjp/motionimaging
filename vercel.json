@@ -19,6 +19,14 @@
     {
       "path": "/api/post-daily",
       "schedule": "15 12 * * *"
+    },
+    {
+      "path": "/api/post-sukuado-morning",
+      "schedule": "30 22 * * *"
+    },
+    {
+      "path": "/api/post-sukuado-night",
+      "schedule": "0 13 * * *"
     }
   ]
 }
