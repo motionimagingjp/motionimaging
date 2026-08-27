@@ -1,20 +1,6 @@
 // app/api/_lib/post-sukuado-core.js
 // スクアド X自動投稿の共通ロジック（朝・夜で共有）
 // ============================================================
-// 投稿先：@scadchatapp（Migoronの @motion_imaging とは別アカウント）
-// 環境変数は SCAD_X_* を使用（Migoronの X_* を上書きしないこと）
-//
-// このファイルは直接cronから呼ばれません。
-// /api/post-sukuado-morning と /api/post-sukuado-night が
-// slot を指定して runSukuado() を呼びます。
-//
-// Migoronで実績のある実装パターンを踏襲：
-//  - 内部fetchを使わない（独立cron）
-//  - Redisカウンタは投稿成功後に更新
-//  - weightedLength() で投稿前チェック（超過はスキップしてレポート）
-//  - X投稿は自動リトライ最大3回・重複403は再試行しない
-//  - ?key= / ?dry=1 / ?force=1 / ?report=1 に対応
-// ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 
@@ -29,15 +15,12 @@ const redis = new Redis({
   token: process.env.KV_REST_API_TOKEN,
 });
 
-// ============================================================
-// スロット定義
-// ============================================================
 const SLOTS = {
   morning: {
     data: morningData,
-    idxKey:   'sukuado_morning_idx',    // 次に投稿するデータindex（0始まり）
-    cycleKey: 'sukuado_morning_cycle',  // 周回数
-    postedKey: 'sukuado_morning_posted', // 本日投稿済みフラグ（日付）
+    idxKey:   'sukuado_morning_idx',
+    cycleKey: 'sukuado_morning_cycle',
+    postedKey: 'sukuado_morning_posted',
     reportKey: 'sukuado_morning_report',
   },
   night: {
@@ -49,9 +32,6 @@ const SLOTS = {
   },
 };
 
-// ============================================================
-// Xの重み付き文字数（Migoron側と同一実装）
-// ============================================================
 function weightedLength(text) {
   const urlRegex = /https?:\/\/[^\s]+/g;
   const urls = text.match(urlRegex) || [];
@@ -69,21 +49,13 @@ function weightedLength(text) {
   return total;
 }
 
-// ============================================================
-// カテゴリ分散並べ替え（決定的・シードなし）
-//   JSONはcatごとに固まって並んでいるため、そのまま投稿すると
-//   同カテゴリが10連続する。ラウンドロビンで散らす。
-//   入力が同じなら出力も必ず同じ（?dry=1と実投稿が一致する）。
-// ============================================================
 function interleaveByCategory(items) {
-  // カテゴリごとのキュー（元のid昇順を保持）
   const buckets = new Map();
   for (const it of items) {
     const c = it.cat || '_';
     if (!buckets.has(c)) buckets.set(c, []);
     buckets.get(c).push(it);
   }
-  // カテゴリの順序は「最初に出現した順」で固定（決定的）
   const order = [];
   for (const it of items) {
     const c = it.cat || '_';
@@ -103,9 +75,6 @@ function interleaveByCategory(items) {
   return result;
 }
 
-// ============================================================
-// X投稿（リトライ付き・重複403は再試行しない）
-// ============================================================
 function isDuplicateError(err) {
   const msg = ((err && err.message) || '') + ' ' + JSON.stringify((err && err.data) || {});
   return /duplicate/i.test(msg) || (err && err.code === 403);
@@ -144,9 +113,6 @@ function getDateStringJST() {
   return `${y}/${m}/${d}`;
 }
 
-// ============================================================
-// メイン：runSukuado(request, slotName)
-// ============================================================
 export async function runSukuado(request, slotName) {
   const url = new URL(request.url);
   const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -155,7 +121,6 @@ export async function runSukuado(request, slotName) {
     return new Response(JSON.stringify({ error: 'unknown slot: ' + slotName }), { status: 500, headers: jsonHeaders });
   }
 
-  // 認証：Authorizationヘッダー または ?key=
   const authHeader = request.headers.get('authorization');
   const keyParam   = url.searchParams.get('key');
   const authorized =
@@ -165,10 +130,131 @@ export async function runSukuado(request, slotName) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  // ?report=1 → 前回レポートを表示（投稿しない）
   if (url.searchParams.get('report') === '1') {
     try {
       const [rep, idx, cycle, posted] = await Promise.all([
         redis.get(slot.reportKey),
         redis.get(slot.idxKey),
         redis.get(slot.cycleKey),
+        redis.get(slot.postedKey),
+      ]);
+      const parsed = typeof rep === 'string' ? JSON.parse(rep) : rep;
+      return new Response(JSON.stringify({
+        slot: slotName,
+        lastReport: parsed,
+        state: {
+          nextIndex: idx ?? '(未設定=0から)',
+          cycle: cycle ?? 0,
+          lastPostedDate: posted ?? '(記録なし)',
+        },
+      }, null, 2), { status: 200, headers: jsonHeaders });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'レポート取得失敗: ' + e.message }), { status: 500, headers: jsonHeaders });
+    }
+  }
+
+  const dryRun = url.searchParams.get('dry') === '1';
+  const force  = url.searchParams.get('force') === '1';
+  const today  = getDateStringJST();
+
+  const ordered = interleaveByCategory(slot.data.items);
+  const total   = ordered.length;
+
+  const report = {
+    slot: slotName,
+    dryRun,
+    startedAt: new Date().toISOString(),
+  };
+
+  try {
+    if (dryRun) {
+      const list = ordered.map((it, i) => ({
+        order: i,
+        id: it.id,
+        cat: it.cat,
+        cta: !!it.cta,
+        weighted: weightedLength(it.tweet),
+        over: weightedLength(it.tweet) > X_LIMIT,
+        tweet: it.tweet,
+      }));
+      const overCount = list.filter(x => x.over).length;
+      return new Response(JSON.stringify({
+        message: 'Dry run（投稿していません）',
+        slot: slotName,
+        total,
+        maxWeighted: Math.max(...list.map(x => x.weighted)),
+        over280: overCount,
+        order: list,
+      }, null, 2), { status: 200, headers: jsonHeaders });
+    }
+
+    if (!force) {
+      const lastPosted = await redis.get(slot.postedKey);
+      if (lastPosted === today) {
+        report.result = '本日投稿済みのためスキップ';
+        return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+      }
+    }
+
+    let idx = await redis.get(slot.idxKey);
+    if (idx === null || idx === undefined) idx = 0;
+    idx = parseInt(idx) % total;
+
+    const item = ordered[idx];
+    const text = item.tweet;
+    const w    = weightedLength(text);
+
+    report.picked = { order: idx, id: item.id, cat: item.cat, cta: !!item.cta, weighted: w };
+
+    if (w > X_LIMIT) {
+      const nextIdx = (idx + 1) % total;
+      await redis.set(slot.idxKey, nextIdx);
+      report.result = `文字数超過(${w})のためスキップ。次回はorder=${nextIdx}`;
+      try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+      return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+    }
+
+    const xClient = new TwitterApi({
+      appKey:       process.env.SCAD_X_API_KEY,
+      appSecret:    process.env.SCAD_X_API_SECRET,
+      accessToken:  process.env.SCAD_X_ACCESS_TOKEN,
+      accessSecret: process.env.SCAD_X_ACCESS_SECRET,
+    });
+
+    const r = await tweetWithRetry(xClient, text);
+
+    if (r.ok) {
+      const nextIdx = (idx + 1) % total;
+      await redis.set(slot.idxKey, nextIdx);
+      await redis.set(slot.postedKey, today, { ex: 82800 });
+      if (nextIdx === 0) {
+        const cycle = parseInt(await redis.get(slot.cycleKey) || '0') + 1;
+        await redis.set(slot.cycleKey, cycle);
+        report.cycleCompleted = cycle;
+      }
+      report.result = 'ok';
+      report.tweetId = r.id;
+      report.nextIndex = nextIdx;
+    } else if (r.duplicate) {
+      const nextIdx = (idx + 1) % total;
+      await redis.set(slot.idxKey, nextIdx);
+      await redis.set(slot.postedKey, today, { ex: 82800 });
+      report.result = '重複のため投稿されず（indexは進めた）';
+      report.nextIndex = nextIdx;
+    } else {
+      report.result = describeXError(r.error, text, r.attempts);
+    }
+
+    report.finishedAt = new Date().toISOString();
+    try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+    return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
+      status: r.ok || r.duplicate ? 200 : 500,
+      headers: jsonHeaders,
+    });
+
+  } catch (error) {
+    report.fatalError = error.message;
+    try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+    return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
+  }
+}
