@@ -1,12 +1,27 @@
 // app/api/_lib/post-sukuado-core.js
 // スクアド X自動投稿の共通ロジック（朝・夜で共有）
 // ============================================================
+// 投稿先：@scadchatapp（Migoronの @motion_imaging とは別アカウント）
+// 環境変数は SCAD_X_* を使用（Migoronの X_* を上書きしないこと）
+//
+// このファイルは直接cronから呼ばれません。
+// /api/post-sukuado-morning と /api/post-sukuado-night が
+// slot を指定して runSukuado() を呼びます。
+//
+// Migoronで実績のある実装パターンを踏襲：
+//  - 内部fetchを使わない（独立cron）
+//  - Redisカウンタは投稿成功後に更新
+//  - weightedLength() で投稿前チェック（超過はスキップしてレポート）
+//  - X投稿は自動リトライ最大3回・重複403は再試行しない
+//  - ?key= / ?dry=1 / ?force=1 / ?report=1 に対応
+// ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 
 // 朝夜のJSONを静的import（ビルド時に同梱される）
 import morningData from '../post-sukuado-morning/tweets.json';
 import nightData from '../post-sukuado-night/tweets.json';
+import promoData from '../post-sukuado-promo/tweets.json';
 
 const X_LIMIT  = 280;
 
@@ -15,12 +30,15 @@ const redis = new Redis({
   token: process.env.KV_REST_API_TOKEN,
 });
 
+// ============================================================
+// スロット定義
+// ============================================================
 const SLOTS = {
   morning: {
     data: morningData,
-    idxKey:   'sukuado_morning_idx',
-    cycleKey: 'sukuado_morning_cycle',
-    postedKey: 'sukuado_morning_posted',
+    idxKey:   'sukuado_morning_idx',    // 次に投稿するデータindex（0始まり）
+    cycleKey: 'sukuado_morning_cycle',  // 周回数
+    postedKey: 'sukuado_morning_posted', // 本日投稿済みフラグ（日付）
     reportKey: 'sukuado_morning_report',
   },
   night: {
@@ -30,8 +48,20 @@ const SLOTS = {
     postedKey: 'sukuado_night_posted',
     reportKey: 'sukuado_night_report',
   },
+  promo: {
+    // 宣伝ツイート：固定3パターンをローテーション（夜枠の後、22:01頃）
+    // 全件 cat が同じなので interleaveByCategory は id順のまま返す＝単純な周回になる
+    data: promoData,
+    idxKey:   'sukuado_promo_idx',
+    cycleKey: 'sukuado_promo_cycle',
+    postedKey: 'sukuado_promo_posted',
+    reportKey: 'sukuado_promo_report',
+  },
 };
 
+// ============================================================
+// Xの重み付き文字数（Migoron側と同一実装）
+// ============================================================
 function weightedLength(text) {
   const urlRegex = /https?:\/\/[^\s]+/g;
   const urls = text.match(urlRegex) || [];
@@ -49,13 +79,21 @@ function weightedLength(text) {
   return total;
 }
 
+// ============================================================
+// カテゴリ分散並べ替え（決定的・シードなし）
+//   JSONはcatごとに固まって並んでいるため、そのまま投稿すると
+//   同カテゴリが10連続する。ラウンドロビンで散らす。
+//   入力が同じなら出力も必ず同じ（?dry=1と実投稿が一致する）。
+// ============================================================
 function interleaveByCategory(items) {
+  // カテゴリごとのキュー（元のid昇順を保持）
   const buckets = new Map();
   for (const it of items) {
     const c = it.cat || '_';
     if (!buckets.has(c)) buckets.set(c, []);
     buckets.get(c).push(it);
   }
+  // カテゴリの順序は「最初に出現した順」で固定（決定的）
   const order = [];
   for (const it of items) {
     const c = it.cat || '_';
@@ -75,6 +113,9 @@ function interleaveByCategory(items) {
   return result;
 }
 
+// ============================================================
+// X投稿（リトライ付き・重複403は再試行しない）
+// ============================================================
 function isDuplicateError(err) {
   const msg = ((err && err.message) || '') + ' ' + JSON.stringify((err && err.data) || {});
   return /duplicate/i.test(msg) || (err && err.code === 403);
@@ -113,6 +154,9 @@ function getDateStringJST() {
   return `${y}/${m}/${d}`;
 }
 
+// ============================================================
+// メイン：runSukuado(request, slotName)
+// ============================================================
 export async function runSukuado(request, slotName) {
   const url = new URL(request.url);
   const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -121,6 +165,7 @@ export async function runSukuado(request, slotName) {
     return new Response(JSON.stringify({ error: 'unknown slot: ' + slotName }), { status: 500, headers: jsonHeaders });
   }
 
+  // 認証：Authorizationヘッダー または ?key=
   const authHeader = request.headers.get('authorization');
   const keyParam   = url.searchParams.get('key');
   const authorized =
@@ -130,6 +175,7 @@ export async function runSukuado(request, slotName) {
     return new Response('Unauthorized', { status: 401 });
   }
 
+  // ?report=1 → 前回レポートを表示（投稿しない）
   if (url.searchParams.get('report') === '1') {
     try {
       const [rep, idx, cycle, posted] = await Promise.all([
@@ -157,6 +203,7 @@ export async function runSukuado(request, slotName) {
   const force  = url.searchParams.get('force') === '1';
   const today  = getDateStringJST();
 
+  // カテゴリ分散した投稿順（決定的）
   const ordered = interleaveByCategory(slot.data.items);
   const total   = ordered.length;
 
@@ -167,6 +214,7 @@ export async function runSukuado(request, slotName) {
   };
 
   try {
+    // ?dry=1 → 全50本の順序と文字数を返す（投稿しない）
     if (dryRun) {
       const list = ordered.map((it, i) => ({
         order: i,
@@ -188,6 +236,7 @@ export async function runSukuado(request, slotName) {
       }, null, 2), { status: 200, headers: jsonHeaders });
     }
 
+    // 重複投稿防止（force=1で無視）
     if (!force) {
       const lastPosted = await redis.get(slot.postedKey);
       if (lastPosted === today) {
@@ -196,6 +245,7 @@ export async function runSukuado(request, slotName) {
       }
     }
 
+    // 次に投稿するindexを取得
     let idx = await redis.get(slot.idxKey);
     if (idx === null || idx === undefined) idx = 0;
     idx = parseInt(idx) % total;
@@ -206,6 +256,8 @@ export async function runSukuado(request, slotName) {
 
     report.picked = { order: idx, id: item.id, cat: item.cat, cta: !!item.cta, weighted: w };
 
+    // 文字数チェック：超過していたらスキップして次回に送る
+    // （このデータでは起きない想定だが、Migoronの花畑指数事故を踏まえた保険）
     if (w > X_LIMIT) {
       const nextIdx = (idx + 1) % total;
       await redis.set(slot.idxKey, nextIdx);
@@ -214,6 +266,7 @@ export async function runSukuado(request, slotName) {
       return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
     }
 
+    // X投稿
     const xClient = new TwitterApi({
       appKey:       process.env.SCAD_X_API_KEY,
       appSecret:    process.env.SCAD_X_API_SECRET,
@@ -224,6 +277,7 @@ export async function runSukuado(request, slotName) {
     const r = await tweetWithRetry(xClient, text);
 
     if (r.ok) {
+      // 成功後にカウンタ更新（成功前に進めない）
       const nextIdx = (idx + 1) % total;
       await redis.set(slot.idxKey, nextIdx);
       await redis.set(slot.postedKey, today, { ex: 82800 });
@@ -236,12 +290,14 @@ export async function runSukuado(request, slotName) {
       report.tweetId = r.id;
       report.nextIndex = nextIdx;
     } else if (r.duplicate) {
+      // 重複＝既に同じ本文が上がっている。indexだけ進めて次回へ。
       const nextIdx = (idx + 1) % total;
       await redis.set(slot.idxKey, nextIdx);
       await redis.set(slot.postedKey, today, { ex: 82800 });
       report.result = '重複のため投稿されず（indexは進めた）';
       report.nextIndex = nextIdx;
     } else {
+      // 恒久エラー：indexは進めない（次回同じ投稿を再試行）
       report.result = describeXError(r.error, text, r.attempts);
     }
 
