@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "account": "@jake_images",
+    "purpose": "立ち上げ用の静的コンテンツ（朝枠：サービス・技術ニュース）。動的生成（Gemini+検索grounding）失敗時のフォールバック専用。",
+    "verified": "2026年8月25日時点でWeb検索確認済み。日付を含む内容のため、動的生成が安定稼働したら内容の古さに注意すること。",
+    "note": "本番は post-jake-ai-core.js の動的生成が優先。ここは生成失敗時のみ使われる。"
+  },
+  "items": [
+    {"id":1,"cat":"新モデル","source":"Business Insider Japan 2026/8",
+     "tweet":"OpenAIがGPT-5.6を正式公開。Sol/Terra/Lunaの3モデル構成で、高性能と低コストの両立を打ち出しています。\n\nモデル名で性格を分ける設計は珍しく、用途で使い分けさせる狙いが見えます。\n#生成AI #ChatGPT"},
+    {"id":2,"cat":"新モデル","source":"Business Insider Japan 2026/8",
+     "tweet":"GoogleがGemini 3.6 Flashを投入。OpenAI・xAIとほぼ同時期の投入で、主要3社の新モデル競争が激しくなっています。\n\n価格は据え置きのまま性能を上げる方向で足並みが揃っているのが今回の特徴。\n#生成AI #Gemini"},
+    {"id":3,"cat":"新モデル","source":"Business Insider Japan 2026/8",
+     "tweet":"SpaceXAI（旧xAI）がコーディング特化モデル「Grok 4.5」を投入。汎用モデルではなく用途特化に振ったのが目を引きます。\n\n「何でもできる」より「これが得意」の方向に競争が移りつつあるのかもしれません。\n#生成AI #Grok"},
+    {"id":4,"cat":"新機能","source":"Business Insider Japan 2026/8",
+     "tweet":"OpenAIが新世代音声モデル「GPT-Live」を公開。フルデュプレックス（全二重）方式で、聞きながら同時に話す自然な会話を実現しています。\n\n英会話練習やリアルタイム翻訳での実用度が上がりそうです。\n#生成AI #音声AI"},
+    {"id":5,"cat":"新機能","source":"Business Insider Japan 2026/8",
+     "tweet":"macOS版Geminiアプリに音声入力機能が追加。Fnキー長押しで起動し、フィラーを除いた整形済みテキストを挿入できます。\n\n画像生成・編集まで音声で完結するのは地味に便利。\n#生成AI #Gemini"},
+    {"id":6,"cat":"新機能","source":"TECH NOISY 2026/8/17-23週",
+     "tweet":"AdobeがFireflyに音楽・音声・効果音の生成機能を追加。Gemini Omni Flashも統合され、全ユーザーに無料アシスタントとして提供されています。\n\n画像だけでなく音周りも内製化できる流れが強まっています。\n#生成AI #Adobe"},
+    {"id":7,"cat":"企業動向","source":"TECH NOISY 2026/8/17-23週",
+     "tweet":"Anthropicが「Claude Mythos 5」のサイバーセキュリティ機能をClaude Enterpriseに開放し、3,500万ドルの防御基金を設立。\n\n生成AI企業自身がセキュリティに巨額投資する段階に入っています。\n#生成AI #Claude"},
+    {"id":8,"cat":"企業動向","source":"TECH NOISY 2026/8/17-23週",
+     "tweet":"GoogleがエージェントAI開発ツール「Antigravity」をGemini Enterpriseに標準統合。監査ログと支出管理も一体提供されるようになりました。\n\n企業導入で最初に聞かれる「誰が何にいくら使ったか」に応える機能です。\n#生成AI #Google"},
+    {"id":9,"cat":"価格改定","source":"TECH NOISY 2026/8/17-23週",
+     "tweet":"OpenAIがGPT-5.6 Solの価格を引き下げ。入力単価20%減・出力単価33%減で、11月21日までの期間限定適用です。\n\n性能競争の次は価格競争、という段階に入ってきました。\n#生成AI #OpenAI"},
+    {"id":10,"cat":"安全設計","source":"TECH NOISY 2026/8/17-23週",
+     "tweet":"OpenAIが13〜17歳向け専用版「ChatGPT for Teens」を発表。ロマンチックな対話を禁止し、宿題は答えを出さず誘導式にする設計です。\n\n生成AIの若年層向け安全設計が具体化してきています。\n#生成AI #OpenAI"}
+  ]
+}

@@ -31,6 +31,14 @@
     {
       "path": "/api/post-sukuado-promo",
       "schedule": "1 13 * * *"
+    },
+    {
+      "path": "/api/post-jake-ai-morning",
+      "schedule": "30 22 * * *"
+    },
+    {
+      "path": "/api/post-jake-ai-night",
+      "schedule": "0 13 * * *"
     }
   ]
 }
