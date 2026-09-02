@@ -155,6 +155,28 @@ function getJstDay() {
   return new Date(Date.now() + 9 * 3600000).getUTCDay();
 }
 
+// X投稿と同じ文面を @jake_images_ のThreadsへテキスト投稿（画像なし・ベストエフォート）
+async function postTextToThreads(token, text) {
+  if (!token) return null;
+  const meRes = await fetch('https://graph.threads.net/v1.0/me?fields=id&access_token=' + token);
+  const me = await meRes.json();
+  if (me.error) throw new Error('Threads me: ' + me.error.message);
+  const cRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ media_type: 'TEXT', text, access_token: token }),
+  });
+  const c = await cRes.json();
+  if (c.error) throw new Error('Threads container: ' + c.error.message);
+  await new Promise(r => setTimeout(r, 2000));
+  const pRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads_publish', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creation_id: c.id, access_token: token }),
+  });
+  const p = await pRes.json();
+  if (p.error) throw new Error('Threads publish: ' + p.error.message);
+  return p.id;
+}
+
 // ============================================================
 // 動的生成：Gemini + Google検索grounding
 // ============================================================
@@ -416,6 +438,16 @@ export async function runJakeAI(request, slotName) {
 
       report.result = r.ok ? 'ok' : '重複のため投稿されず（状態は進めた）';
       if (r.ok) report.tweetId = r.id;
+
+      // 同じ文面を @jake_images_ のThreadsへ（ベストエフォート・失敗してもX投稿の成功には影響しない）
+      if (r.ok) {
+        try {
+          const threadsId = await postTextToThreads(process.env.THREADS_JAKE_TOKEN, text);
+          report.threads = threadsId ? 'ok: ' + threadsId : 'skip（トークン未設定）';
+        } catch (te) {
+          report.threads = 'error: ' + te.message;
+        }
+      }
     } else {
       // 恒久エラー：状態は進めない（次回同じ投稿を再試行）
       report.result = describeXError(r.error, text, r.attempts);
