@@ -183,7 +183,8 @@ async function callGeminiWithSearch(apiKey, prompt) {
       tools: [{ google_search: {} }],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 500,
+        maxOutputTokens: 2048,
+        thinkingConfig: { thinkingBudget: 512 },
       },
     }),
   });
@@ -191,6 +192,9 @@ async function callGeminiWithSearch(apiKey, prompt) {
   if (data.error) throw new Error('Gemini Error: ' + data.error.message);
   const candidate = data.candidates && data.candidates[0];
   if (!candidate || !candidate.content) throw new Error('Gemini: candidatesが空です（finishReason=' + (candidate && candidate.finishReason) + '）');
+  if (candidate.finishReason === 'MAX_TOKENS') {
+    throw new Error('Gemini: maxOutputTokens上限に達し、応答が途中で切れました');
+  }
   const parts = candidate.content.parts || [];
   const textPart = parts.find(p => p.text && !p.thought);
   const text = (textPart ? textPart.text : (parts[parts.length - 1] || {}).text || '').trim();
