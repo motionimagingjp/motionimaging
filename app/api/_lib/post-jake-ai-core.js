@@ -183,7 +183,7 @@ async function callGeminiWithSearch(apiKey, prompt) {
       tools: [{ google_search: {} }],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 2048,
+        maxOutputTokens: 4096,
         thinkingConfig: { thinkingBudget: 512 },
       },
     }),
@@ -191,22 +191,31 @@ async function callGeminiWithSearch(apiKey, prompt) {
   const data = await res.json();
   if (data.error) throw new Error('Gemini Error: ' + data.error.message);
   const candidate = data.candidates && data.candidates[0];
-  if (!candidate || !candidate.content) throw new Error('Gemini: candidatesが空です（finishReason=' + (candidate && candidate.finishReason) + '）');
-  if (candidate.finishReason === 'MAX_TOKENS') {
-    throw new Error('Gemini: maxOutputTokens上限に達し、応答が途中で切れました');
+  const finishReason = (candidate && candidate.finishReason) || 'UNKNOWN';
+  if (!candidate || !candidate.content) throw new Error(`Gemini: candidatesが空です（finishReason=${finishReason}）`);
+  // 検索の引用が原文に近すぎる場合など、STOP以外で打ち切られることがある
+  if (['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII'].includes(finishReason)) {
+    throw new Error(`Gemini: 応答がブロックされました（finishReason=${finishReason}）`);
   }
   const parts = candidate.content.parts || [];
   const textPart = parts.find(p => p.text && !p.thought);
   const text = (textPart ? textPart.text : (parts[parts.length - 1] || {}).text || '').trim();
-  if (!text) throw new Error('Gemini: 空の応答');
-  return text;
+  if (!text) throw new Error(`Gemini: 空の応答（finishReason=${finishReason}）`);
+  return { text, finishReason };
 }
 
-function parseGeminiTweet(raw) {
+function parseGeminiTweet(raw, finishReason) {
   const clean = raw.replace(/```json|```/g, '').trim();
   const match = clean.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('Gemini: JSON形式で返答がありません: ' + clean.slice(0, 200));
-  const parsed = JSON.parse(match[0]);
+  if (!match) {
+    throw new Error(`Gemini: JSON形式で返答がありません（finishReason=${finishReason}, len=${clean.length}）: ${clean.slice(0, 300)}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch (e) {
+    throw new Error(`Gemini: JSON解析失敗（finishReason=${finishReason}）: ${e.message} | raw: ${match[0].slice(0, 300)}`);
+  }
   if (!parsed.tweet || parsed.topic === 'NO_NEWS') {
     throw new Error('Gemini: 該当ニュース/事例なし（NO_NEWS）');
   }
@@ -215,8 +224,8 @@ function parseGeminiTweet(raw) {
 
 async function generateDynamicTweet(slot, history) {
   const prompt = buildPrompt(slot, history);
-  const raw = await callGeminiWithSearch(process.env.GEMINI_API_KEY, prompt);
-  const { tweet, topic } = parseGeminiTweet(raw);
+  const { text, finishReason } = await callGeminiWithSearch(process.env.GEMINI_API_KEY, prompt);
+  const { tweet, topic } = parseGeminiTweet(text, finishReason);
   const w = weightedLength(tweet);
   if (w > X_LIMIT) throw new Error(`生成ツイートが文字数超過(${w})`);
   return { tweet, topic, source: 'dynamic' };
