@@ -15,6 +15,7 @@ import { Redis } from '@upstash/redis';
 
 import morningData from '../post-jake-ai-morning/tweets.json';
 import nightData from '../post-jake-ai-night/tweets.json';
+import diaryData from '../post-jake-ai-night/diary.json';
 
 const X_LIMIT = 280;
 const GEMINI_MODEL = 'gemini-2.5-flash';
@@ -466,6 +467,132 @@ export async function runJakeAI(request, slotName) {
   } catch (error) {
     report.fatalError = error.message;
     try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+    return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
+  }
+}
+
+// ============================================================
+// 「ノーコード×生成AI開発 30日振り返り」企画（夜枠の2件目）
+// ============================================================
+// 夜cronから runJakeAI(request, 'night') と並行して呼ばれる、独立した投稿枠。
+// 固定30本を1日1本ずつ投稿し、day30まで終わったらループせず自動停止する。
+// 新しいVercel cronは追加しない（既存の夜cronの中でもう1件投稿するだけ）。
+const DIARY_TOTAL      = diaryData.items.length;
+const DIARY_IDX_KEY    = 'jake_ai_diary_idx';
+const DIARY_POSTED_KEY = 'jake_ai_diary_posted';
+const DIARY_REPORT_KEY = 'jake_ai_diary_report';
+
+export async function runJakeAIDiary(request) {
+  const url = new URL(request.url);
+  const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
+
+  const authHeader = request.headers.get('authorization');
+  const keyParam   = url.searchParams.get('key');
+  const authorized =
+    authHeader === 'Bearer ' + process.env.CRON_SECRET ||
+    (keyParam && keyParam === process.env.CRON_SECRET);
+  if (!authorized) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  if (url.searchParams.get('report') === '1') {
+    try {
+      const [rep, idx, posted] = await Promise.all([
+        redis.get(DIARY_REPORT_KEY),
+        redis.get(DIARY_IDX_KEY),
+        redis.get(DIARY_POSTED_KEY),
+      ]);
+      const parsed = typeof rep === 'string' ? JSON.parse(rep) : rep;
+      const nextIdx = idx === null || idx === undefined ? 0 : parseInt(idx);
+      return new Response(JSON.stringify({
+        lastReport: parsed,
+        state: {
+          nextDay: nextIdx >= DIARY_TOTAL ? '完了' : nextIdx + 1,
+          total: DIARY_TOTAL,
+          lastPostedDate: posted ?? '(記録なし)',
+        },
+      }, null, 2), { status: 200, headers: jsonHeaders });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'レポート取得失敗: ' + e.message }), { status: 500, headers: jsonHeaders });
+    }
+  }
+
+  const dryRun = url.searchParams.get('dry') === '1';
+  const force  = url.searchParams.get('force') === '1';
+  const today  = getDateStringJST();
+  const report = { dryRun, startedAt: new Date().toISOString() };
+
+  try {
+    let idx = await redis.get(DIARY_IDX_KEY);
+    idx = idx === null || idx === undefined ? 0 : parseInt(idx);
+
+    if (idx >= DIARY_TOTAL) {
+      report.result = '30日分の投稿が完了しています（追加投稿なし）';
+      return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+    }
+
+    if (!force && !dryRun) {
+      const lastPosted = await redis.get(DIARY_POSTED_KEY);
+      if (lastPosted === today) {
+        report.result = '本日分は投稿済みのためスキップ';
+        return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+      }
+    }
+
+    const item = diaryData.items[idx];
+    const text = item.tweet;
+    const w    = weightedLength(text);
+    report.day = item.day;
+    report.weighted = w;
+
+    if (dryRun) {
+      report.result = 'dry run（投稿していません）';
+      report.tweetPreview = text;
+      return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+    }
+
+    if (w > X_LIMIT) {
+      report.result = `文字数超過(${w})のため投稿中止`;
+      try { await redis.set(DIARY_REPORT_KEY, JSON.stringify(report)); } catch {}
+      return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 500, headers: jsonHeaders });
+    }
+
+    const xClient = new TwitterApi({
+      appKey:       process.env.JAKE_X_API_KEY,
+      appSecret:    process.env.JAKE_X_API_SECRET,
+      accessToken:  process.env.JAKE_X_ACCESS_TOKEN,
+      accessSecret: process.env.JAKE_X_ACCESS_SECRET,
+    });
+
+    const r = await tweetWithRetry(xClient, text);
+
+    if (r.ok || r.duplicate) {
+      await redis.set(DIARY_IDX_KEY, idx + 1);
+      await redis.set(DIARY_POSTED_KEY, today, { ex: 82800 });
+      report.result = r.ok ? 'ok' : '重複のため投稿されず（状態は進めた）';
+      if (r.ok) {
+        report.tweetId = r.id;
+        try {
+          const threadsId = await postTextToThreads(process.env.THREADS_JAKE_TOKEN, text);
+          report.threads = threadsId ? 'ok: ' + threadsId : 'skip（トークン未設定）';
+        } catch (te) {
+          report.threads = 'error: ' + te.message;
+        }
+      }
+    } else {
+      report.result = describeXError(r.error, text, r.attempts);
+    }
+
+    report.finishedAt = new Date().toISOString();
+    try { await redis.set(DIARY_REPORT_KEY, JSON.stringify(report)); } catch {}
+    return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
+      status: r.ok || r.duplicate ? 200 : 500,
+      headers: jsonHeaders,
+    });
+
+  } catch (error) {
+    report.fatalError = error.message;
+    try { await redis.set(DIARY_REPORT_KEY, JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
 }
