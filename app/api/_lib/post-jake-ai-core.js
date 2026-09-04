@@ -113,8 +113,11 @@ function interleaveByCategory(items) {
 // X投稿（リトライ付き・重複403は再試行しない）
 // ============================================================
 function isDuplicateError(err) {
+  // 「重複」以外の403（権限不足・課金設定不足など）まで重複扱いにすると
+  // 本当のエラーが握りつぶされて「投稿されないのに毎回成功扱い」になるため、
+  // 本文に"duplicate"を含む場合のみ重複と判定する（コード403だけでは判定しない）
   const msg = ((err && err.message) || '') + ' ' + JSON.stringify((err && err.data) || {});
-  return /duplicate/i.test(msg) || (err && err.code === 403);
+  return /duplicate/i.test(msg);
 }
 
 async function tweetWithRetry(xClient, text, attempts = 3) {
