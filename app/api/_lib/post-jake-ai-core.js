@@ -113,8 +113,11 @@ function interleaveByCategory(items) {
 // X投稿（リトライ付き・重複403は再試行しない）
 // ============================================================
 function isDuplicateError(err) {
+  // 「重複」以外の403（権限不足・課金設定不足など）まで重複扱いにすると
+  // 本当のエラーが握りつぶされて「投稿されないのに毎回成功扱い」になるため、
+  // 本文に"duplicate"を含む場合のみ重複と判定する（コード403だけでは判定しない）
   const msg = ((err && err.message) || '') + ' ' + JSON.stringify((err && err.data) || {});
-  return /duplicate/i.test(msg) || (err && err.code === 403);
+  return /duplicate/i.test(msg);
 }
 
 async function tweetWithRetry(xClient, text, attempts = 3) {
@@ -153,6 +156,28 @@ function getDateStringJST() {
 function getJstDay() {
   // 0=日, 1=月, ... 6=土
   return new Date(Date.now() + 9 * 3600000).getUTCDay();
+}
+
+// X投稿と同じ文面を @jake_images_ のThreadsへテキスト投稿（画像なし・ベストエフォート）
+async function postTextToThreads(token, text) {
+  if (!token) return null;
+  const meRes = await fetch('https://graph.threads.net/v1.0/me?fields=id&access_token=' + token);
+  const me = await meRes.json();
+  if (me.error) throw new Error('Threads me: ' + me.error.message);
+  const cRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ media_type: 'TEXT', text, access_token: token }),
+  });
+  const c = await cRes.json();
+  if (c.error) throw new Error('Threads container: ' + c.error.message);
+  await new Promise(r => setTimeout(r, 2000));
+  const pRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads_publish', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creation_id: c.id, access_token: token }),
+  });
+  const p = await pRes.json();
+  if (p.error) throw new Error('Threads publish: ' + p.error.message);
+  return p.id;
 }
 
 // ============================================================
@@ -416,6 +441,16 @@ export async function runJakeAI(request, slotName) {
 
       report.result = r.ok ? 'ok' : '重複のため投稿されず（状態は進めた）';
       if (r.ok) report.tweetId = r.id;
+
+      // 同じ文面を @jake_images_ のThreadsへ（ベストエフォート・失敗してもX投稿の成功には影響しない）
+      if (r.ok) {
+        try {
+          const threadsId = await postTextToThreads(process.env.THREADS_JAKE_TOKEN, text);
+          report.threads = threadsId ? 'ok: ' + threadsId : 'skip（トークン未設定）';
+        } catch (te) {
+          report.threads = 'error: ' + te.message;
+        }
+      }
     } else {
       // 恒久エラー：状態は進めない（次回同じ投稿を再試行）
       report.result = describeXError(r.error, text, r.attempts);

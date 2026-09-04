@@ -146,6 +146,28 @@ function describeXError(err, text, attempts) {
     + ' | attempts:' + attempts;
 }
 
+// X投稿と同じ文面を @tokyo_goshuin_tsushin のThreadsへテキスト投稿（画像なし・ベストエフォート）
+async function postTextToThreads(token, text) {
+  if (!token) return null;
+  const meRes = await fetch('https://graph.threads.net/v1.0/me?fields=id&access_token=' + token);
+  const me = await meRes.json();
+  if (me.error) throw new Error('Threads me: ' + me.error.message);
+  const cRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ media_type: 'TEXT', text, access_token: token }),
+  });
+  const c = await cRes.json();
+  if (c.error) throw new Error('Threads container: ' + c.error.message);
+  await new Promise(r => setTimeout(r, 2000));
+  const pRes = await fetch('https://graph.threads.net/v1.0/' + me.id + '/threads_publish', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creation_id: c.id, access_token: token }),
+  });
+  const p = await pRes.json();
+  if (p.error) throw new Error('Threads publish: ' + p.error.message);
+  return p.id;
+}
+
 function getDateStringJST() {
   const jst = new Date(Date.now() + 9 * 3600000);
   const y = jst.getUTCFullYear();
@@ -289,6 +311,14 @@ export async function runSukuado(request, slotName) {
       report.result = 'ok';
       report.tweetId = r.id;
       report.nextIndex = nextIdx;
+
+      // 同じ文面を @tokyo_goshuin_tsushin のThreadsへ（ベストエフォート・失敗してもX投稿の成功には影響しない）
+      try {
+        const threadsId = await postTextToThreads(process.env.THREADS_SUKUADO_TOKEN, text);
+        report.threads = threadsId ? 'ok: ' + threadsId : 'skip（トークン未設定）';
+      } catch (te) {
+        report.threads = 'error: ' + te.message;
+      }
     } else if (r.duplicate) {
       // 重複＝既に同じ本文が上がっている。indexだけ進めて次回へ。
       const nextIdx = (idx + 1) % total;
