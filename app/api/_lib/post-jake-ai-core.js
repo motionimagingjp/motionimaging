@@ -187,16 +187,17 @@ async function postTextToThreads(token, text) {
 function buildPrompt(slot, history) {
   const historyText = history.length ? history.map(h => '・' + h).join('\n') : '（まだ履歴なし）';
   return `あなたは生成AIニュースを日本語で発信するXアカウント「@jake_images」の投稿担当です。\n`
-    + `${slot.promptTopic}について、Google検索で最新情報を確認し、実際に存在する具体的な内容を1つ選んでツイート文を作成してください。\n\n`
+    + `${slot.promptTopic}について、Google検索で最新情報を確認し、実際に存在する具体的な内容を1つ選んでください。\n\n`
     + `【直近${HISTORY_DAYS}日以内に投稿済みのため避けるべき話題】\n${historyText}\n\n`
     + `【出力条件】\n`
-    + `- 日本語で140字程度\n`
+    + `- 本文は日本語で120字程度。URLやハッシュタグ、出典表記は本文に含めない（別項目で出力する）\n`
     + `- Google検索で確認できる事実のみを扱う。存在しない情報を創作しない\n`
-    + `- 文末に出典が分かるURLを1つ含める\n`
-    + `- 最後に関連ハッシュタグを1〜2個つける（${slot.hashtagHint}）\n`
+    + `- 出典メディア名（例：Yahoo!ニュース、日本経済新聞、ITmediaなど）を15字以内で\n`
+    + `- 出典記事のURLを1つ\n`
+    + `- 関連ハッシュタグを1〜2個（${slot.hashtagHint}）。#記号は付けず単語のみ\n`
     + `- 確認できる話題がなければ topic を "NO_NEWS" にする\n\n`
     + `必ず以下のJSON形式のみで出力してください。マークダウンや説明文は不要です。\n`
-    + `{"topic":"話題を15字以内で要約したもの（重複チェック用）","tweet":"投稿本文。改行は\\nで表現"}`;
+    + `{"topic":"話題を15字以内で要約したもの（重複チェック用）","body":"本文のみ。改行は\\nで表現","sourceName":"出典メディア名","sourceUrl":"出典URL","hashtags":["タグ1","タグ2"]}`;
 }
 
 async function callGeminiWithSearch(apiKey, prompt) {
@@ -242,10 +243,23 @@ function parseGeminiTweet(raw, finishReason) {
   } catch (e) {
     throw new Error(`Gemini: JSON解析失敗（finishReason=${finishReason}）: ${e.message} | raw: ${match[0].slice(0, 300)}`);
   }
-  if (!parsed.tweet || parsed.topic === 'NO_NEWS') {
+  if (!parsed.body || parsed.topic === 'NO_NEWS') {
     throw new Error('Gemini: 該当ニュース/事例なし（NO_NEWS）');
   }
-  return { tweet: String(parsed.tweet).trim(), topic: String(parsed.topic || '').trim() };
+  if (!parsed.sourceUrl) {
+    throw new Error('Gemini: 出典URLが取得できませんでした');
+  }
+  // 本文・出典・ハッシュタグはAIに構造化データとして出させ、最終的な文面組み立てはコード側で確定させる
+  const hashtags = Array.isArray(parsed.hashtags)
+    ? parsed.hashtags.filter(Boolean).map(h => '#' + String(h).trim().replace(/^#/, ''))
+    : [];
+  const sourceLine = parsed.sourceName
+    ? `（出典：${String(parsed.sourceName).trim()}）\n${String(parsed.sourceUrl).trim()}`
+    : String(parsed.sourceUrl).trim();
+  const tweet = [String(parsed.body).trim(), sourceLine, hashtags.join(' ')]
+    .filter(Boolean)
+    .join('\n\n');
+  return { tweet, topic: String(parsed.topic || '').trim() };
 }
 
 async function generateDynamicTweet(slot, history) {
