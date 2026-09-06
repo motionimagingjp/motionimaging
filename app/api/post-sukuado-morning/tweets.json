@@ -2,7 +2,7 @@
   "meta": {
     "app": "スクアド",
     "purpose": "X日次投稿用 恋愛統計＋アドバイス 50本",
-    "note": "tweetは全角130字前後。ctaがtrueの回だけ末尾にアプリURLを付ける想定（3回に1回程度）。",
+    "note": "tweetは全角130字前後。ctaがtrueの回だけ末尾にアプリURLを付ける想定（3回に1回程度）。この直後(7:31 JST)にpost-sukuado-morning-question/tweets.jsonの質問投げかけ投稿が続く（朝は統計＋質問の2本立て）。",
     "verified": "2026-08時点でWeb確認。数値は毎年更新されるため、四半期に一度は出典元を再確認すること。"
   },
   "items": [
