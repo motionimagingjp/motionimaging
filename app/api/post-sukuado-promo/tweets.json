@@ -2,24 +2,24 @@
   "meta": {
     "app": "スクアド",
     "purpose": "宣伝ツイート（夜枠post-sukuado-nightの後、22:01頃に固定文言をローテーション投稿）",
-    "note": "3パターンを順番に投稿。ローテーションはRedisのsukuado_promo_idxで管理。",
+    "note": "3パターンを順番に投稿。ローテーションはRedisのsukuado_promo_idxで管理。URLにはutm_source=x&utm_medium=social&utm_campaign=sukuado&utm_content=promo{id}を付与し、Xの宣伝ツイート経由の流入とパターン別の効果をGA等で計測できるようにしている。",
     "slot": "promo"
   },
   "items": [
     {
       "id": 1,
       "cat": "promo",
-      "tweet": "恋愛の相談も、婚活の悩みも。\n\nスクアドAIアドバイザーが、スクショを送るだけでアドバイスします。\n\n▼今すぐ無料で相談\nhttps://scad-chat.vercel.app/\n\n#スクアド #婚活 #恋愛相談"
+      "tweet": "恋愛の相談も、婚活の悩みも。\n\nスクアドAIアドバイザーが、スクショを送るだけでアドバイスします。\n\n▼今すぐ無料で相談\nhttps://scad-chat.vercel.app/?utm_source=x&utm_medium=social&utm_campaign=sukuado&utm_content=promo1\n\n#スクアド #婚活 #恋愛相談"
     },
     {
       "id": 2,
       "cat": "promo",
-      "tweet": "そのメッセージ、送る前に見てもらいませんか。\n\nスクアドは、恋愛・婚活のやりとりをスクショで送るだけでAIがアドバイスするサービスです。\n\n▼無料で試す\nhttps://scad-chat.vercel.app/\n\n#スクアド #マッチングアプリ #恋愛相談"
+      "tweet": "そのメッセージ、送る前に見てもらいませんか。\n\nスクアドは、恋愛・婚活のやりとりをスクショで送るだけでAIがアドバイスするサービスです。\n\n▼無料で試す\nhttps://scad-chat.vercel.app/?utm_source=x&utm_medium=social&utm_campaign=sukuado&utm_content=promo2\n\n#スクアド #マッチングアプリ #恋愛相談"
     },
     {
       "id": 3,
       "cat": "promo",
-      "tweet": "一人で抱えず、スクショ1枚から。\n\nプロフィールの書き方も、返信に迷うメッセージも、スクアドAIアドバイザーに相談できます。\n\n▼今すぐ相談してみる\nhttps://scad-chat.vercel.app/\n\n#スクアド #婚活アプリ #AI相談"
+      "tweet": "一人で抱えず、スクショ1枚から。\n\nプロフィールの書き方も、返信に迷うメッセージも、スクアドAIアドバイザーに相談できます。\n\n▼今すぐ相談してみる\nhttps://scad-chat.vercel.app/?utm_source=x&utm_medium=social&utm_campaign=sukuado&utm_content=promo3\n\n#スクアド #婚活アプリ #AI相談"
     }
   ]
 }
