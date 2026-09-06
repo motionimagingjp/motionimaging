@@ -221,6 +221,24 @@ export async function runSukuado(request, slotName) {
     }
   }
 
+  // ?resetIndex=1 → 次回投稿位置(=0)から仕切り直す（投稿しない）
+  // JSONを新しいバッチに丸ごと差し替えたときなど、途中のインデックスを
+  // 引き継がず1本目から回したい場合に使う。&resetCycle=1で周回数も0に戻す。
+  if (url.searchParams.get('resetIndex') === '1') {
+    try {
+      await redis.set(slot.idxKey, 0);
+      if (url.searchParams.get('resetCycle') === '1') {
+        await redis.set(slot.cycleKey, 0);
+      }
+      return new Response(JSON.stringify({
+        message: `${slotName}: インデックスを0にリセットしました`,
+        resetCycle: url.searchParams.get('resetCycle') === '1',
+      }, null, 2), { status: 200, headers: jsonHeaders });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'リセット失敗: ' + e.message }), { status: 500, headers: jsonHeaders });
+    }
+  }
+
   const dryRun = url.searchParams.get('dry') === '1';
   const force  = url.searchParams.get('force') === '1';
   const today  = getDateStringJST();
