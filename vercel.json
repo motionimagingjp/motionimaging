@@ -25,6 +25,10 @@
       "schedule": "30 22 * * *"
     },
     {
+      "path": "/api/post-sukuado-morning-question",
+      "schedule": "31 22 * * *"
+    },
+    {
       "path": "/api/post-sukuado-night",
       "schedule": "0 13 * * *"
     },

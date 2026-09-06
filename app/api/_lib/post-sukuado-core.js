@@ -20,6 +20,7 @@ import { Redis } from '@upstash/redis';
 
 // 朝夜のJSONを静的import（ビルド時に同梱される）
 import morningData from '../post-sukuado-morning/tweets.json';
+import morningQuestionData from '../post-sukuado-morning-question/tweets.json';
 import nightData from '../post-sukuado-night/tweets.json';
 import promoData from '../post-sukuado-promo/tweets.json';
 
@@ -40,6 +41,14 @@ const SLOTS = {
     cycleKey: 'sukuado_morning_cycle',  // 周回数
     postedKey: 'sukuado_morning_posted', // 本日投稿済みフラグ（日付）
     reportKey: 'sukuado_morning_report',
+  },
+  morningQuestion: {
+    // 朝2本目：質問投げかけツイート（朝1本目の直後、7:31頃）
+    data: morningQuestionData,
+    idxKey:   'sukuado_morningQuestion_idx',
+    cycleKey: 'sukuado_morningQuestion_cycle',
+    postedKey: 'sukuado_morningQuestion_posted',
+    reportKey: 'sukuado_morningQuestion_report',
   },
   night: {
     data: nightData,
