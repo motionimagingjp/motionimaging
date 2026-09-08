@@ -19,6 +19,16 @@
 ## 構成
 
 ```
+app/                     Next.js App Router（PWA）
+  page.tsx               トップ
+  join/                  参加者アプリ（?t=session_token）
+  e/[checkinToken]/      掲示QRからの受付（6桁の受付コード入力）
+  organizer/             主催者コンソール
+components/              参加者画面のUI
+lib/
+  api.ts                 Edge Function クライアント
+  phase.ts               一斉キックの受信（Realtime + 10秒ポーリングの二重化）
+  storage.ts             セッションと入力の端末保存（電波断でも消えない）
 supabase/
   migrations/
     0001_init.sql   スキーマ
@@ -46,6 +56,15 @@ tests/
     10_security.test.sql RLS・RPC の挙動テスト
 scripts/test-sql.sh      ローカル postgres を立ててSQLテストを実行
 ```
+
+## 開発
+
+```bash
+cp .env.example .env.local   # Supabase の URL と anon key を入れる
+npm run dev
+```
+
+デプロイ手順と、ビルドで実際に踏んだ落とし穴は [DEPLOY.md](./DEPLOY.md) にまとめてある。
 
 ## テスト
 

@@ -47,10 +47,14 @@ Deno.serve(async (req) => {
 
     const { data, error } = await db.rpc('checkin_participant', { p_session_token: sessionToken });
     if (error) throw error;
-    const p = data as { gender: string; participant_number: number; nickname: string | null };
+    const p = data as {
+      event_id: string; gender: string; participant_number: number; nickname: string | null;
+    };
 
     return json({
       sessionToken,
+      // Realtime で phase を購読するために返す。event_states は元々 anon が読めるので秘匿情報ではない
+      eventId: p.event_id,
       gender: p.gender,
       participantNumber: p.participant_number,
       nickname: p.nickname,

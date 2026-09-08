@@ -5,9 +5,27 @@
   "type": "module",
   "description": "街コン運営WEBアプリ PartyConnect",
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "test": "npm run test:unit && npm run test:functions && npm run test:sql",
     "test:unit": "node --test tests/*.test.ts",
     "test:functions": "bash scripts/check-functions.sh",
     "test:sql": "bash scripts/test-sql.sh"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "^15.5.25",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

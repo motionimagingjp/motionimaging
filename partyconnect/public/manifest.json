@@ -1,0 +1,12 @@
+{
+  "name": "PartyConnect",
+  "short_name": "PartyConnect",
+  "description": "街コンの受付からマッチングまでを進める参加者用アプリ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1020",
+  "theme_color": "#0f1020",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

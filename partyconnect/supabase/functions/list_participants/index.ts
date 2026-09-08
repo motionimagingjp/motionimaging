@@ -61,6 +61,7 @@ Deno.serve(async (req) => {
 
     return json({
       phase: session.phase,
+      eventId: session.eventId,
       self: { gender: session.gender, number: session.participantNumber },
       // 0件を可視化しないため件数は返さない（仕様 4-1④）
       hasLikes: likedByNumbers.size > 0,

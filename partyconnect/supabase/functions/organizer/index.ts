@@ -163,6 +163,13 @@ Deno.serve(async (req) => {
         if (countError) throw countError;
         if ((existing ?? 0) > 0) throw new AppError('すでに参加者が登録されています');
 
+        // 受付フェーズにしてから採番する。本番と同じ経路を通す
+        await db.from('event_states').update({ phase: 'checkin' }).eq('event_id', event.id);
+        await db.from('events').update({ status: 'active' })
+          .eq('id', event.id).eq('status', 'draft');
+
+        const males: string[] = [];
+        const females: string[] = [];
         for (let i = 0; i < 20; i++) {
           const gender = i < 10 ? 'male' : 'female';
           const sessionToken = newSessionToken();
@@ -180,8 +187,43 @@ Deno.serve(async (req) => {
             free_text: null,
           }).eq('id', (slot as { id: string }).id);
           if (updateError) throw updateError;
+
+          const { error: checkinError } = await db.rpc('checkin_participant', {
+            p_session_token: sessionToken,
+          });
+          if (checkinError) throw checkinError;
+          (gender === 'male' ? males : females).push((slot as { id: string }).id);
         }
-        return json({ seeded: 20 });
+
+        // ダミーの投票も入れる。これが無いと主催者が一人で確定まで通せない（デモは営業ツール）
+        const votes: Record<string, unknown>[] = [];
+        const pushVotes = (from: string[], to: string[], offset: number) => {
+          from.forEach((fromId, i) => {
+            for (let k = 0; k < 3; k++) {
+              votes.push({
+                event_id: event.id,
+                from_participant_id: fromId,
+                to_participant_id: to[(i + offset + k) % to.length],
+                vote_type: 'final',
+                preference_order: k + 1,
+              });
+            }
+            votes.push({
+              event_id: event.id,
+              from_participant_id: fromId,
+              to_participant_id: to[(i + offset) % to.length],
+              vote_type: 'like',
+              preference_order: null,
+            });
+          });
+        };
+        // 男女で offset を揃えると全員が相互指名になり不自然なので、片側だけずらす
+        pushVotes(males, females, 0);
+        pushVotes(females, males, 1);
+        const { error: voteError } = await db.from('votes').insert(votes);
+        if (voteError) throw voteError;
+
+        return json({ seeded: 20, votes: votes.length });
       }
 
       default:
