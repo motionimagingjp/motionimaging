@@ -1,0 +1,622 @@
+# 街コン運営WEBアプリ「PartyConnect」要件定義書 v3.1（実装確定版）
+
+更新日：2026年9月8日
+前版：v3（最終確定版）
+本版の位置づけ：v3の「12. 実装時の必須確認事項」7項目に**すべて結論を出し**、それに伴うスキーマ・セキュリティ設計を確定させた版。
+**このファイル単体で実装に着手できる。以降の変更はこのファイルを直接更新すること。**
+
+---
+
+## 0. v3 からの変更点サマリ（実装者はここだけ先に読む）
+
+| # | v3での状態 | v3.1の結論 |
+|---|---|---|
+| 1 | 片側指名を成立候補に含めるか未定（v3推奨は「含める」） | **含めない。相互指名のみ成立**に変更。理由は5-1 |
+| 2 | 採番方法未定 | **チェックイン確定時に到着順で採番**。`participant_counters` テーブルで単一UPDATE文によるアトミック採番 |
+| 3 | 性別判定未定 | **申込枠（男性枠/女性枠）で事前確定。参加者は変更不可**。飛び込みは主催者が指定 |
+| 4 | 途中退出の扱い未定 | **Phase 1 に「辞退」機能を含める**。`participants.status` による論理無効化。番号は欠番のまま再利用しない |
+| 5 | 手動消去時の統計確認 | **削除の入口を Edge Function `purge_event` 1本に統一**。手動もCronも同じ関数を通す |
+| 6 | RLSポリシー未定 | **全テーブル デフォルト拒否＋anon/authenticatedからのGRANT剥奪。参加者操作は全てEdge Function経由**。例外は `event_states` の読み取りのみ |
+| 7 | バックアップ保持期間未定 | **PITRは有効化しない／日次バックアップ最大7日と明記**。加えて `line_contact` を**イベント別鍵で暗号化し、削除時に鍵を破棄**（crypto-shredding） |
+| ★ | QRトークン「15分更新」 | **印刷QRとの矛盾を解消**。掲示用QRは固定URL、15分ローテーションはスタッフ端末表示用のみ（7-3） |
+| ★ | 料金表 | 月2回時に スポットとライトが同額(9,960円)でライトを選ぶ理由がない。**ライト超過単価を3,480円に修正**を提案（8章） |
+
+---
+
+## 1. プロダクト概要
+
+| 項目 | 内容 |
+|---|---|
+| サービス名（仮） | PartyConnect（パーティコネクト） |
+| 一言でいうと | 紙・手書き一切なしで街コンの受付〜マッチング〜データ消去まで完結させる進行システム |
+| 形態 | PWA（Webアプリ / インストール不要） |
+| ビジネスモデル | 主催者向けB2B SaaS（**参加者は完全無料**、主催者が課金） |
+| 主ターゲット | 地方・個人の小規模主催者（ワンオペ運用層） |
+| 想定規模 | 1イベントあたり20〜100名（100名で設計） |
+
+### 提供価値
+- **参加者**：個人情報が終了後30分で消える心理的安全性 ＋ プロフィールを見ながら会話できる手軽さ
+- **主催者**：受付・集計の手間がゼロ、ワンオペ運用可能 ＋ **終了直後に自動生成される集客用レポート**
+
+---
+
+## 2. 用語定義
+
+| 用語 | 意味 |
+|---|---|
+| 主催者（organizer） | イベントを開催する事業者・個人。課金対象。Supabase Auth のユーザー |
+| 参加者（participant） | 会場に来場した街コン参加者。アカウント登録なし、`session_token` のみ |
+| キック | 主催者が全参加者の画面を一斉に次のフェーズへ切り替える操作 |
+| 好印象 | 中間判定での「気になる」投票（`vote_type = 'like'`） |
+| 最終希望 | 第1〜第3希望の指名（`vote_type = 'final'`） |
+| 辞退（withdrawn） | 当日キャンセル・途中退出により主催者が無効化した参加者 |
+
+---
+
+## 3. 全体フロー（イベント当日のタイムライン）
+
+```
+[事前]  申込者へ個別URLをメール/LINEで送付（gender・event_id を含むトークン付き）
+        → プロフィール事前入力（この時点では participant_number は未発番）
+
+[当日]
+ 1. 受付        掲示QRスキャン（または4桁コード入力）でセルフチェックイン
+                → その場で participant_number を採番し「男性 No.5」と特大表示
+ 2. プロフ確認   事前入力データを読み込み、確認・修正のみ（未入力者はその場で入力）
+ 3. 閲覧・歓談   番号一覧からカードを選び、相手のプロフを見ながら会話
+ 4. 中間判定     [キック1] 好印象の投票を送信
+                [キック2] 受信結果を一斉開示（★好印象マーク付与）
+ 5. 最終希望     第1〜第3希望を番号ボタンで選択・送信
+ 6. 確定         主催者が登録状況（〇/〇名）を確認して【確定】
+                → マッチング計算 → ★統計をDBへ先行書き込み → 結果一斉配信
+ 7. 交換タイム   30分カウントダウン。成立ペアのみ連絡先を相互表示
+ 8. 消去        30分経過（または主催者の手動キック）で参加者データを物理削除
+```
+
+### フェーズ定義（`event_states.phase` の値と1対1で対応させること）
+
+| phase | 参加者画面 | 遷移トリガ |
+|---|---|---|
+| `draft` | （URL無効） | イベント作成時 |
+| `checkin` | チェックイン画面 | 主催者「受付開始」 |
+| `profile` | プロフ確認・修正 | チェックイン完了で個別に遷移 |
+| `browse` | 閲覧一覧 | 主催者「歓談開始」 |
+| `like_vote` | 好印象投票 | 主催者キック1 |
+| `like_reveal` | 一覧に★付与 | 主催者キック2 |
+| `final_vote` | 第1〜3希望入力 | 主催者「最終希望開始」 |
+| `calculating` | 「計算中」画面 | 主催者「確定」 |
+| `result` | 結果＋30分カウントダウン | 計算・統計書込完了後、自動 |
+| `purged` | 消去完了画面 | 削除バッチ完了後 |
+
+> `checkin` と `profile` は参加者ごとに進むため、イベント全体の phase は `checkin` のまま個別状態で制御する。
+
+---
+
+## 4. 画面仕様
+
+### 4-1. 参加者側
+
+#### ① チェックイン
+- メイン：会場掲示・卓上POPの**QRコードスキャン**によるセルフチェックイン（固定URL。7-3参照）
+- バックアップ：**4桁数字コード入力**（暗い店内・カメラ不具合対策）
+- 事前入力済みの参加者は、事前配布URLの `session_token` でそのまま本人として認識される
+- 完了と同時に参加者番号を発番し、画面に**特大表示**（例：`男性 No.5`）
+- セッションはURLトークンで復元可能とし、ブラウザを閉じても番号が失われないこと（LocalStorageにも保持）
+- **チェックイン時に利用規約・プライバシーポリシーへの同意チェックを必須**（11章）
+
+#### ② プロフィール登録
+- **前半（選択式）**：ニックネーム、住まい、出身、血液型、身長、職業、休日、婚姻歴 等をタップ選択
+- **後半（自由テキスト）**：`textarea`（例：「得意料理」「休日の過ごし方」）
+- **原則は事前入力**。会場でテキストを打たせると全員が下を向いて沈黙する事故が起きるため、当日は確認・修正のみ
+- 未入力者向けに当日その場入力のフォールバックを用意
+- **性別は表示のみ・変更不可**（12-3の結論）
+- 閲覧側では自由記述を親しみやすいフォントで表示し、会話のきっかけを演出
+
+#### ③ 閲覧一覧
+- 男性No.1〜 / 女性No.1〜 のカード一覧
+- **100人規模対応**：番号入力による一発ジャンプ検索、テーブル/グループ別の絞り込みタブを必須実装
+- **辞退者は一覧に表示しない**（12-4の結論）。番号は欠番になるが再利用しない
+
+#### ④ 中間判定
+- キック1：気になった異性の番号ボタンをタップして送信
+- キック2：受信結果を一斉開示。自分に好印象を送った相手のカードに「★好印象!」を付与
+- **好印象0件のメンタル保護**：0件の場合は件数を表示せず「集計中、または順次開示されます」等の中立メッセージにする。**「0件」と可視化しないこと**
+
+#### ⑤ 最終希望登録
+- 第1〜第3希望を番号ボタンで選択して送信
+- **★が付いた相手を上部に強調表示**（相互指名率を上げるための重要UI。5-1参照）
+
+#### ⑥ 結果表示
+- **成立時**：相手のLINE ID / LINE QR画像 / 電話番号を相互表示 ＋ 30分カウントダウンを大きく表示
+  - 文言例：「あと 29:59 でデータが自動消去されます。今すぐ交換してください！」
+- **不成立時**（確定文言）：
+  > ご参加ありがとうございました！
+  > 本日のパーティーの集計が完了いたしました。今回はあいにくマッチング成立となりませんでしたが、素敵な出会いのきっかけとなっていれば幸いです。
+  > ※参加者の個人情報保護のため、本日入力いただいたプロフィールおよび投票データは30分後に自動的に安全に消去されます。
+- **消去後**：消去完了画面へ切り替え
+
+### 4-2. 主催者側
+
+- イベント作成（イベント名、開催日時、QR/4桁コード発行、事前入力URLの一括発行）
+- リアルタイム進捗カウンター（チェックイン数、プロフ登録済、投票完了数 〇/〇名）
+- 一斉キック：受付開始 / 歓談開始 / 好印象投票開始 / 好印象開示 / 最終希望開始 / **確定・結果配信** / データ即時消去
+- **参加者管理**：一覧から個別に「辞退（無効化）」できること（12-4）。誤操作対策として `result` フェーズ以降は辞退操作を不可にする
+- **代理入力機能**：バッテリー切れ・端末不所持の参加者に代わって入力・投票を行う（必須）
+- **デモモード**：ダミー参加者20名で一人で全フローを通せる。営業ツールとして必須。**デモイベントは課金カウントに含めない／統計にも保存しない**
+- レポート閲覧（有料プランのみPDF出力可）
+
+---
+
+## 5. マッチングアルゴリズム仕様
+
+### 5-1.【v3.1確定】片側指名の扱い ＝ **相互指名のみ成立**
+
+**結論：双方が互いを第1〜第3希望に指名しているペアのみを成立候補とする。片側だけの指名は成立させない。**
+
+理由：
+1. **成立の結果が「連絡先の相互開示」であるため。** 指名していない相手に自分のLINE IDが渡るのは、同意なき個人情報の第三者提供に近く、本サービスの中核訴求（プライバシー）と正面から矛盾する
+2. **参加者の納得感。** 「なぜこの人と？」が起きると主催者へのクレームになり、リピート率を直接下げる。婚活パーティー実務でもカップリングは相互選択が標準
+3. **法令面（11章）。** 「主催者が確定した、双方が希望したペアのみ連絡先を相互表示する」という建付けのほうが、出会い系規制法の相談時に説明しやすい
+
+**成立数が減る懸念への対策：**
+- 中間判定の**★好印象開示（キック2）が、事実上の相互性ヒントとして機能する。** ★の付いた相手を最終希望画面で上部に強調表示することで、相互一致率を構造的に押し上げる。この★フェーズがあるからこそ相互のみ運用が成立する（★を廃止するとこの判断は崩れるので、セットで維持すること）
+- `event_analytics` に「片側指名だったため不成立になったペア数（`one_sided_pairs_count`）」を記録し、運用データで方針の妥当性を後から検証できるようにする
+
+### 5-2. アルゴリズム
+
+- **最大重み二部マッチング（Weighted Bipartite Matching）／ハンガリアン法または最小費用流**
+  - ※「安定結婚問題（Gale-Shapley）」ではない。1人1ペア上限・第3希望までの有限指名のため
+- **辺の存在条件**：男性A→女性B の指名 **かつ** 女性B→男性A の指名が両方存在すること（5-1）
+- **重み**：第1希望＝3点 / 第2希望＝2点 / 第3希望＝1点
+- **ペアスコア** `s` ＝ 男性側の指名点 ＋ 女性側の指名点（相互第1希望＝6点、相互第3希望＝2点。取り得る値は 2〜6）
+- **目的関数**：`成立ペア数の最大化` を最優先。同ペア数なら合計スコアが高い組み合わせを採用
+  - 実装：辺の重みを `W = 1000 + s` とする（`1000` は理論最大スコア差 6×50=300 を十分上回る定数）。合計重み最大化がそのまま「ペア数最優先→スコア最大」の辞書式順序になる
+  - **整数演算のみで実装すること。浮動小数点を使うと再計算の同一性が保証できない**
+- **タイブレーク（再現性）**：イベント作成時に生成した `seed_value` を使う。
+  1. 参加者リストを `seed_value` を種とする決定的PRNG（xorshift等）でシャッフルし、順序を固定する
+  2. その順序を入力として、同点時は先に現れた候補を採る決定的な実装に流す
+  → **同じデータ＋同じseedなら、何度再計算しても必ず同一結果**になる。単体テストで「同一入力を100回計算して全て一致」を検証すること
+- **制約**：1人あたり最大1ペア、重複なし。`status = 'withdrawn'` の参加者は入力から除外し、その参加者が関わる投票も無効として扱う
+- **人数不均衡・指名なし**：余った参加者は不成立扱い（4-1⑥の文言）
+- **性能要件**：100名（50×50）でサーバー計算 0.1秒以内（ハンガリアン法 O(n³)=125,000演算。余裕で満たす）
+
+### 5-3. 参加者向け説明文言
+> 全員の第1〜第3希望を解析し、会場全体で最も多くのカップルが誕生する最適な組み合わせを自動計算しています。
+
+---
+
+## 6. データ設計
+
+### 6-1. 設計方針（最重要）
+
+**データを二層に分離する。** 参加者の個人情報は消すが、主催者向けの匿名統計は永続保存する。これがサブスク継続の中核価値であり、「全部消える」設計だと主催者に何も残らずSaaSとして成立しない。
+
+| 区分 | 内容 | 保持 |
+|---|---|---|
+| 参加者データ | プロフィール、自由記述、連絡先、投票、マッチ結果 | 結果送信30分後に**物理削除** |
+| 主催者統計 | 人数、男女比、成立ペア数・成立率、属性別分布、所要時間 | **匿名化して永続保存** |
+
+参加者テーブルと統計テーブルは**外部キーで直結せず、event_id で疎結合**にする。これにより個人情報の削除処理が統計側を破壊しない。
+
+### 6-2. ライフサイクル（Race Condition 回避）
+
+```
+【フェーズA】主催者が「確定」を押した瞬間（Edge Function `finalize_event` 内で順に実行）
+  1. phase を 'calculating' に更新（二重実行防止のため、既に calculating/result なら即return）
+  2. マッチングアルゴリズム実行（ペア確定）→ matches へ書き込み
+  3. ★participants / votes を元に統計を計算し event_analytics へ UPSERT（ここまで同一トランザクション）
+  4. events.status='finished'、events.finished_at=NOW() を記録
+  5. phase を 'result' に更新 → Realtime で全参加者へ一斉配信。30分カウント開始
+
+【フェーズB】30分後 または 手動消去キック（どちらも Edge Function `purge_event` を呼ぶ）
+  1. status='finished' かつ finished_at < NOW() - 30分 のイベントを抽出（手動時は経過条件を免除）
+  2. event_analytics に該当 event_id のレコードが存在することを確認
+     → 存在しなければ削除を中止し、統計集計を先に実行。それでも失敗したらアラートを上げて終了
+  3. matches / votes / participants を物理削除
+  4. イベント別暗号鍵を破棄（7-4）
+  5. events.status='purged'、event_states.phase='purged' に更新
+```
+
+> **実装上の厳格なルール**
+> - 統計の集計・書き込みは、結果配信より**前に**必ず完了させること。削除バッチ側で集計しようとすると統計が空になる
+> - **削除処理の入口は `purge_event` 1本に統一する。** 手動消去キックが独自の DELETE を叩く実装は禁止（12-5の結論）
+
+### 6-3. スキーマ（PostgreSQL / Supabase）
+
+```sql
+-- 1. 主催者（永続）
+-- id は Supabase Auth の auth.users.id と一致させる（RLSで auth.uid() と突き合わせるため）
+CREATE TABLE organizers (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone_number VARCHAR(20) UNIQUE NOT NULL,   -- 無料枠の不正利用防止用
+    is_phone_verified BOOLEAN DEFAULT FALSE,    -- SMS認証済みフラグ
+    plan_type VARCHAR(50) DEFAULT 'free',       -- free, spot, light, pro
+    free_trial_used BOOLEAN DEFAULT FALSE,      -- 初回無料枠の消費済みフラグ
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. イベント（永続）
+CREATE TABLE events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organizer_id UUID NOT NULL REFERENCES organizers(id),
+    event_name VARCHAR(100) NOT NULL,
+    event_date DATE,
+    passcode VARCHAR(4) NOT NULL,               -- 4桁チェックインコード
+    checkin_token TEXT NOT NULL,                -- 掲示QR用の固定トークン（イベント単位・終了で無効化）
+    seed_value INT NOT NULL,                    -- マッチング計算用シード
+    status VARCHAR(20) DEFAULT 'draft',         -- draft, active, finished, purged
+    is_demo BOOLEAN DEFAULT FALSE,              -- デモモードのイベント（課金・統計の対象外）
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,                    -- ★削除バッチの起点
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_events_purge ON events(status, finished_at);
+
+-- 2-b. 一斉キック同期用の公開ステート（★参加者が唯一 SELECT できるテーブル。個人情報を一切持たない）
+CREATE TABLE event_states (
+    event_id UUID PRIMARY KEY,
+    phase VARCHAR(30) NOT NULL DEFAULT 'draft', -- 3章のフェーズ定義に対応
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2-c. 参加者番号の採番カウンタ（★イベント作成時に male/female の2行を必ず先に作る）
+CREATE TABLE participant_counters (
+    event_id UUID NOT NULL,
+    gender VARCHAR(10) NOT NULL,
+    next_number INT NOT NULL DEFAULT 1,
+    PRIMARY KEY (event_id, gender)
+);
+
+-- 3. 参加者プロフィール（30分後に物理削除）
+CREATE TABLE participants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL,                     -- 外部キー制約はあえて付けず独立させる
+    gender VARCHAR(10) NOT NULL,                -- male / female（申込枠で確定。参加者は変更不可）
+    participant_number INT,                     -- ★NULL許容。チェックイン確定時に採番
+    status VARCHAR(20) NOT NULL DEFAULT 'invited', -- invited / active / withdrawn
+    nickname VARCHAR(50),
+    profile_data JSONB,                         -- 住まい・職業・年代などの選択項目
+    free_text TEXT,                             -- 自由記述
+    line_contact TEXT,                          -- ★イベント別鍵で暗号化して格納（7-4）
+    session_token TEXT UNIQUE NOT NULL,         -- セッション復元用。事前配布URLにも埋め込む
+    is_proxy BOOLEAN DEFAULT FALSE,             -- 主催者による代理入力
+    agreed_at TIMESTAMPTZ,                      -- 規約・プライバシーポリシー同意日時
+    checked_in_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_event_gender_number UNIQUE (event_id, gender, participant_number)
+);
+CREATE INDEX idx_participants_event ON participants(event_id);
+
+-- 4. 投票（30分後に物理削除）
+CREATE TABLE votes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL,
+    from_participant_id UUID NOT NULL,          -- ★クライアント指定を信用せずサーバ側で確定する
+    to_participant_id UUID NOT NULL,
+    vote_type VARCHAR(20) NOT NULL,             -- 'like'（好印象） / 'final'（最終指名）
+    preference_order INT,                       -- final の場合 1〜3
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_vote UNIQUE (event_id, from_participant_id, to_participant_id, vote_type)
+);
+CREATE INDEX idx_votes_event ON votes(event_id);
+-- 同一人物が同じ希望順位を2人に付けられないようにする
+CREATE UNIQUE INDEX uq_final_pref ON votes(event_id, from_participant_id, preference_order)
+    WHERE vote_type = 'final';
+
+-- 5. マッチング結果（30分後に物理削除）
+CREATE TABLE matches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL,
+    male_participant_id UUID NOT NULL,
+    female_participant_id UUID NOT NULL,
+    score INT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_matches_event ON matches(event_id);
+
+-- 6. 主催者向け匿名統計（永続保存・個人情報ゼロ）
+CREATE TABLE event_analytics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID UNIQUE NOT NULL,
+    organizer_id UUID NOT NULL,
+    total_male_count INT DEFAULT 0,             -- status='active' のみ計上
+    total_female_count INT DEFAULT 0,
+    withdrawn_count INT DEFAULT 0,              -- ★追加：辞退者数
+    matched_pairs_count INT DEFAULT 0,
+    match_rate NUMERIC(5,2),                    -- 成立者数 / active参加者数 × 100
+    like_vote_count INT DEFAULT 0,              -- ★追加：好印象投票の総数
+    one_sided_pairs_count INT DEFAULT 0,        -- ★追加：片側指名のみで不成立になったペア数（5-1の検証用）
+    duration_minutes INT,                       -- started_at〜finished_at
+    attributes_summary JSONB DEFAULT '{}'::jsonb,
+    /* attributes_summary の中身イメージ:
+       {
+         "age_groups":   {"20s": 10, "30s": 5},
+         "occupations":  {"IT": 4, "Medical": 3, "Service": 8},
+         "top_matched_professions": ["IT x Medical"]
+       } */
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_analytics_organizer ON event_analytics(organizer_id);
+```
+
+> **匿名性の担保**：`attributes_summary` に人数の少ない属性をそのまま残すと個人が特定されうる。**同一属性の該当者が3名未満のカテゴリは "other" に丸めて集計すること。**
+
+### 6-4.【v3.1確定】参加者番号の採番（12-2の結論）
+
+**結論：事前割当ではなく、チェックイン確定時に到着順で採番する。**
+
+理由：
+- 事前割当だと当日キャンセルで番号が虫食いになり、100人規模の一覧で「No.7がいない」という混乱が常時発生する。到着順なら1〜Nが連続する
+- 飛び込み参加と事前申込を同じ導線で扱える
+- 受付直後に「男性 No.5」が確定して特大表示される＝**紙の番号札を完全に置き換えられる**（本サービスの提供価値そのもの）
+
+**採番SQL（トランザクション内・単一UPDATE文でアトミックに採番）**
+
+```sql
+-- 前提：イベント作成時に participant_counters へ (event_id,'male'),(event_id,'female') を INSERT 済み
+BEGIN;
+
+UPDATE participant_counters
+   SET next_number = next_number + 1
+ WHERE event_id = $1 AND gender = $2
+RETURNING next_number - 1 AS assigned_number;   -- ← この行ロックだけで競合が直列化される
+
+UPDATE participants
+   SET participant_number = $3,                 -- 上で得た assigned_number
+       status = 'active',
+       checked_in_at = NOW()
+ WHERE id = $4 AND participant_number IS NULL;  -- ★二重チェックイン防止
+
+COMMIT;
+```
+
+- `UPDATE ... RETURNING` は該当行を排他ロックするため、同時チェックインが自動的に直列化される。**アプリ側のリトライループは不要**
+- `unique_event_gender_number` はあくまで最後の砦。制約違反が出た時点でバグとして検知する
+- 辞退者の番号は**再利用しない**（「男性No.7」が別人になる事故を防ぐ）
+
+### 6-5.【v3.1確定】性別の判定（12-3の結論）
+
+**結論：申込枠（男性枠／女性枠）で事前確定させ、参加者側からは変更不可とする。**
+
+理由：
+1. 街コンは男女比のバランスそのものが商品であり、参加者が任意に選べると枠管理が破綻する
+2. 男女で参加費が異なるのが通例で、性別は**申込・決済の時点ですでに確定している**情報。二重に聞く必要がない
+3. 誤申告による会場トラブル・返金対応を根本から防げる
+
+実装：
+- 事前配布URLは主催者が男性枠／女性枠を指定して発行する。`gender` はトークンに紐づく `participants` レコードに固定済みで、参加者画面では表示のみ
+- 当日の飛び込みは、主催者画面の「代理登録」から性別を指定して発行する（受付での目視と同時に確定）
+- MVPは `male` / `female` の二値。カラムは VARCHAR のままにして将来の拡張余地を残す
+
+### 6-6.【v3.1確定】当日キャンセル・途中退出（12-4の結論）
+
+**結論：主催者画面からの「辞退（無効化）」機能を Phase 1 に含める。物理削除ではなく `status='withdrawn'` による論理無効化。**
+
+理由：途中退出者を放置すると、(a) 一覧に不在者のカードが残り参加者が投票してしまう (b) 不成立ペアが増えて成立率という主催者向けKPIが汚れる (c) 成立しても連絡先交換できず苦情になる。
+
+挙動：
+
+| 対象 | withdrawn の扱い |
+|---|---|
+| 閲覧一覧 | 非表示 |
+| 好印象・最終希望の投票先 | 選択不可。既存の投票レコードは残すが集計対象外 |
+| マッチング入力 | 除外（その人が絡む辺を張らない） |
+| 参加者番号 | 欠番のまま。**再利用しない** |
+| 統計 | `total_*_count` から除外し `withdrawn_count` に計上。`match_rate` の母数からも除外 |
+| 本人の画面 | 「主催者により受付が取り消されました」表示。以後の操作を全て拒否 |
+
+- 誤操作対策：辞退の取り消し（`active` に戻す）を可能にする。ただし `result` フェーズ以降は辞退操作自体を不可にする
+
+---
+
+## 7. セキュリティ・権限設計（12-6の結論）
+
+Supabase をクライアントから直接叩く構成では、RLSを設定しないと参加者全員が他人の連絡先も投票内容も丸見えになる。これはサービスの根幹を破壊する致命的欠陥のため、以下を**必須要件**とする。
+
+### 7-1. 基本方針：**参加者はDBを直接触らない**
+
+`session_token` ベースの認可をRLSポリシーで書こうとすると、匿名参加者（Supabase Auth ユーザーではない）ではJWTクレームやカスタムGUCに頼ることになり、複雑化してミスが致命傷になる。
+
+**したがって、参加者の全操作を Edge Function（`service_role`）経由に一本化し、テーブルには「デフォルト拒否」だけを置く。** 攻撃面が Edge Function の引数検証に集約され、レビューしやすくなる。
+
+例外は `event_states`（phaseのみを持つテーブル）の SELECT だけ。Realtime による一斉キック同期のために必要で、漏れても無害な情報しか含まない。
+
+### 7-2. RLSポリシー（実装用SQL）
+
+```sql
+-- 1) 全テーブルでRLSを有効化
+ALTER TABLE organizers            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_states          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE participant_counters  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE participants          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE votes                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE matches               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_analytics       ENABLE ROW LEVEL SECURITY;
+
+-- 2) ★Supabaseは public スキーマに anon/authenticated へ既定でGRANTしている。
+--    RLS以前にテーブル権限そのものを剥奪する（二重防御）
+REVOKE ALL ON participants, votes, matches, participant_counters FROM anon, authenticated;
+
+-- 3) 参加者（anon）が触れるのは event_states の SELECT だけ
+CREATE POLICY event_states_public_read ON event_states
+    FOR SELECT TO anon, authenticated USING (true);
+-- INSERT/UPDATE/DELETE のポリシーは作らない（= service_role のみ書き込める）
+
+-- 4) 主催者（authenticated）は自分のデータのみ
+CREATE POLICY organizers_self ON organizers
+    FOR SELECT TO authenticated USING (id = auth.uid());
+
+CREATE POLICY organizers_self_update ON organizers
+    FOR UPDATE TO authenticated USING (id = auth.uid()) WITH CHECK (id = auth.uid());
+
+CREATE POLICY events_owner ON events
+    FOR ALL TO authenticated
+    USING (organizer_id = auth.uid())
+    WITH CHECK (organizer_id = auth.uid());
+
+CREATE POLICY analytics_owner_read ON event_analytics
+    FOR SELECT TO authenticated USING (organizer_id = auth.uid());
+-- 統計はEdge Functionのみが書き込む（INSERT/UPDATEポリシーを作らない）
+```
+
+> **主催者が参加者一覧・進捗を見る場合も Edge Function 経由にすること。** `participants` に主催者用のSELECTポリシーを付けると、`line_contact` が主催者に見えてしまい「主催者にも連絡先は見えません」という訴求が崩れる。
+
+### 7-3.【v3.1確定】QRトークンの設計（v3の矛盾を解消）
+
+v3は「QRトークンはイベント別・15分更新のワンタイム」としていたが、**掲示・卓上POPのQRは印刷物なので15分ごとに更新できない。** ここを分離して確定する。
+
+| 種類 | 用途 | 仕様 |
+|---|---|---|
+| **掲示用QR（MVPで実装）** | 会場入口・卓上POP | `events.checkin_token` を含む**固定URL**。`status='active'` かつ phase が `checkin` の間だけ受理し、それ以外は拒否。イベント終了で永久に無効 |
+| スタッフ端末表示QR（Phase 2） | 受付スタッフの画面に表示 | HMAC(event_id, 15分枠, サーバ秘密鍵)。現在枠と直前枠を受理（時計ずれ吸収） |
+
+- 固定URLの流出リスクは、**「そのURLを知っていても、物理的に会場にいなければ意味がない」**（番号を名乗る相手が実在しない／主催者の進捗カウンタに不明な人数が出て即座に気づける）ことと、受付時間帯以外は無効であることで実用上潰せる
+- **加えて、主催者画面の進捗カウンタに「想定人数を超えたチェックイン」の警告を出す**こと。これが実質的な不正検知になる
+
+### 7-4.【v3.1確定】バックアップ・PITRと「完全削除」訴求の整合（12-7の結論）
+
+**問題**：Supabaseの日次バックアップ／PITRには、物理削除後も参加者データが残る。「30分で完全に消える」と広告すると実態と乖離し、優良誤認・個人情報保護法上の説明不正確のリスクがある。
+
+**結論（3点セット）**
+
+1. **PITR（Point-in-Time Recovery）は有効化しない。** 日次バックアップのみとし、**保持期間は最大7日**とする
+2. **プライバシーポリシーに正確に記載する。**
+   > 入力いただいた情報はイベント終了30分後にデータベースから削除されます。ただし障害復旧用のバックアップには最大7日間、暗号化された状態で残存します。この間、当社が内容を復元・参照することはありません。
+   - 参加者向けUIでは「30分後に削除されます」の表記で構わないが、**プライバシーポリシーへのリンクを必ず同一画面に置く**
+3. **crypto-shredding（鍵破棄）で実質的な復元不能を担保する。**
+   - `line_contact`（および可能なら `free_text`）を**イベント別のデータ鍵**で暗号化して保存する
+   - データ鍵は `participants` と同じ行には置かず、削除時に確実に破棄できる場所（Edge Function の環境秘密＋専用テーブル `event_keys`、またはKMS）に保持する
+   - `purge_event` の最後にデータ鍵を破棄する → **バックアップに暗号文が残っても復号不能**になり、「復元は事実上不可能」と正確に主張できる
+   - MVPの最小実装は `line_contact` のみを対象にすれば足りる（工数最小・効果最大）
+
+> **UI文言の正確性についてもう1点**：成立相手の連絡先は参加者にスクリーンショットされる。これは技術的に防げない。したがって訴求は「**当サービスがデータを保持しない**」という意味であることが伝わる文言にすること（「相手の記憶やスクリーンショットまで消えるわけではない」ことを誤認させない）。
+
+### 7-5. その他の必須事項
+
+- `votes` は**書き込み専用**。誰が誰に投票したかの生データはクライアントに一切返さない（「★好印象」は集計済みの結果のみ配信）
+- 参加者の認可は `session_token` で行い、**`from_participant_id` はクライアントの申告を一切信用せず、`session_token` からサーバ側で解決する。** これが「他人になりすました投票」を防ぐ唯一の防御
+- `participants.line_contact` はクライアントから直接取得させない。**成立ペアの当事者にのみ、Edge Function が復号して返す**（`phase='result'` かつ `matches` に該当ペアが存在する場合のみ）
+- 参加者番号の発番はトランザクション内で採番（6-4）
+- Edge Function には**レート制限**を入れる（1 `session_token` あたり毎分N回）。会場Wi-Fiは同一IPになるため、IP単位ではなくトークン単位で制限すること
+- 監査ログ：主催者の破壊的操作（辞退、手動消去、確定）は `organizer_id`・`event_id`・操作種別・日時のみを永続ログに残す（個人情報は含めない）
+
+---
+
+## 8. 料金プラン
+
+| プラン | 月額 | 無料開催枠 | 超過単価 | 月1回 | 月2回 | 月3回 | ターゲット |
+|---|---|---|---|---|---|---|---|
+| フリー（初回） | 0円 | 1回のみ | ─ | 0円 | ─ | ─ | 新規お試し |
+| スポット（都度） | 0円 | 0回 | 4,980円/回 | 4,980円 | 9,960円 | 14,940円 | 年数回の個人・飲食店 |
+| ライト（月額） | 5,980円 | 月1回 | **3,480円/回** | 5,980円 | **9,460円** | **12,940円** | 月1〜2回の小規模主催者 |
+| プロ（月額） | 11,800円 | 無制限 | 0円 | 11,800円 | 11,800円 | 11,800円 | 月3回以上の事業者 |
+
+**【v3.1で修正】ライトの超過単価を 3,980円 → 3,480円 に変更。**
+v3の設定では月2回時にスポットとライトが**同額の9,960円**になり、月額を払ってライトを選ぶ理由が存在しなかった。3,480円にすることで「月1回＝スポット／月2回＝ライト／月3回以上＝プロ」という損益分岐の階段が正しく成立する。
+
+- **不正利用対策**：新規登録時に**SMS認証（電話番号）を必須化**。1電話番号につき初回無料は1回のみ
+- **無料枠の追加制限（提案）**：初回無料は**参加者20名以下**に限定する。デモモードで機能検証は十分できるため、本番の大規模会（50名超）は必ず課金対象にしたい
+- **アップセル導線**：フリープランでは画面上の簡易表示のみ。**PDFレポート出力は有料プラン限定**
+- デモモードのイベント（`is_demo=true`）は開催回数にカウントしない
+
+---
+
+## 9. MVPスコープと優先順位
+
+判断基準は**「主催者がサポートなしで初回イベントを1回完走できるか」**。ここで詰まると二度と使われない。
+
+### 🔴 Phase 1（リリース必須）
+- 参加者：QRチェックイン、プロフ確認・修正、閲覧一覧（100人対応の検索UI）、好印象投票、最終希望投票、結果表示＋30分カウントダウン、規約同意
+- 主催者：一斉キック各種、**参加者の辞退（無効化）**、代理入力、進捗カウンター、デモモード（ダミー20名）
+- コア：**相互指名のみの**最大重みマッチング（100人対応・seed再現性テスト付き）、統計の先行書き込み、`purge_event` による30分自動削除バッチ、RLS（7-2）、`line_contact` の暗号化と鍵破棄
+
+### 🟡 Phase 2（マネタイズ）
+- 主催者レポート自動生成（PDF）
+- Stripe決済（スポット／サブスク）
+- オンボーディング（当日マニュアル1枚、事前チェックリスト）
+- スタッフ端末表示型のローテーションQR
+
+### 🔵 Phase 3（拡張）
+- 参加者向けバイラル導線（結果画面へのサービス名/ロゴ常設）
+- 事前プロフ入力のLINE公式アカウント連携（自動リマインド）
+
+---
+
+## 10. 技術スタック
+
+| レイヤ | 採用 | 備考 |
+|---|---|---|
+| フロントエンド | Next.js (React) | PWA化（Service Worker）、オフライン入力保持は LocalStorage |
+| バックエンド/DB | Supabase (PostgreSQL) | 一斉キックは `event_states` の Realtime Subscriptions で同期 |
+| ロジック/バッチ | Supabase Edge Functions (Deno/TS) | マッチング計算、統計集計、Cronでの `purge_event` 実行 |
+| 決済 | Stripe | Phase 2 |
+| SMS認証 | Twilio 等 | 無料枠の不正利用防止 |
+| ホスティング | Vercel | |
+| DNS/セキュリティ | Cloudflare | SSL、DDoS保護、CDN |
+
+**リポジトリ**：既存の `motionimaging`（SNS自動投稿のcronアプリ）とは**別リポジトリで新規に立てる**。既存リポジトリはルートがNext.jsアプリで `vercel.json` に cron 定義を持っており、同居させるとビルド設定が衝突するため。
+
+### 主要 Edge Function 一覧
+
+| 関数 | 役割 |
+|---|---|
+| `checkin` | session_token 検証 → 6-4の採番トランザクション実行 |
+| `save_profile` | プロフィール保存（gender は書き換え不可） |
+| `list_participants` | 閲覧一覧を返す（`line_contact` を含めない射影。withdrawn を除外） |
+| `submit_vote` | 投票登録。`from_participant_id` はトークンから解決 |
+| `get_like_reveal` | 自分宛の好印象の**集計結果のみ**返す（0件時は件数を返さない） |
+| `finalize_event` | 6-2フェーズA。マッチング＋統計＋配信を一括実行（冪等） |
+| `get_result` | 成立時のみ相手の連絡先を復号して返す |
+| `purge_event` | 6-2フェーズB。**削除の唯一の入口**（Cron・手動キック共通） |
+
+### 通信環境の前提
+会場は地下の飲食店が多く**電波が弱い前提**で実装すること。楽観的UI＋再接続時の自動同期、通信断でも入力が消えないこと（LocalStorageへの逐次保存と、復帰時のサーバ再送）。Realtime が切れた場合に備え、**phase のポーリング（10秒間隔）をフォールバックとして必ず実装する。** 一斉キックが届かないと会場全体が止まるため、ここは二重化必須。
+
+---
+
+## 11. 法令・コンプライアンス
+
+### 11-1. 出会い系サイト規制法（インターネット異性紹介事業）— **リリース前の最優先タスク**
+
+異性の連絡先交換を仲介する機能がある以上、届出対象と判断される可能性がある。**開発と並行ではなく、リリース前の最優先タスクとして管轄警察署（生活安全課）へ事前相談すること。** 無届けでの提供は罰則対象になり得る。
+
+**相談時の説明骨子**
+1. リアル来場者限定であり、不特定多数に公開される検索機能はない（同一会場に居合わせた者同士に閲覧範囲が限定される）
+2. 主催者が確定した、**双方が希望したペアのみ**連絡先を相互表示する（5-1の相互指名限定は、この説明を成立させるための設計でもある）
+3. データはイベント終了30分後に完全削除される
+4. 年齢確認は会場受付で主催者が対面実施している
+5. 上記の形態が届出対象に該当するか
+
+**★事業上、最も重要な確認事項**
+仮に「インターネット異性紹介事業」に該当すると判断された場合、**年齢確認（公的証明書等の確認）とその記録の保存義務**が発生する可能性がある。これは「データを30分で消す」という本サービスの中核訴求と**正面から矛盾する**。
+したがって、「該当するかどうか」は法務コストの問題ではなく**プロダクトが成立するかどうかの問題**である。設計を作り込む前に、弁護士および管轄警察への確認を完了させること。該当と判断された場合は、保存義務の対象が主催者側の記録（＝本サービス外）で足りる建付けに再設計する必要がある。
+
+※本項は法律の専門的判断を含む。ここに書かれた見立ては**確定的な法解釈ではなく、専門家に確認すべき論点の整理**である。
+
+### 11-2. 個人情報保護
+- 利用規約・プライバシーポリシーへの同意取得を**チェックイン時に必須化**（`participants.agreed_at` に記録）
+- 取得項目、利用目的、保持期間（イベント終了後30分）、**バックアップ保持期間（最大7日）**を正確に記載（7-4）
+- 参加者は主催者と当社の関係（委託か共同利用か）を明示する
+
+### 11-3. 年齢確認
+- 18歳以上（実運用上は成人）の確認は**会場受付での目視・身分証確認**とし、その旨を主催者マニュアルに明記する
+- アプリ側では「主催者が年齢確認を実施済みであること」を主催者に確認させるチェックをイベント作成時に入れる
+
+---
+
+## 12. 追補：事業・マーケティング面での指摘
+
+1. **レポートPDFが解約防止の唯一のフックである。**
+   本サービスは「イベント当日しか使わない」ため、月額プランは休眠しやすい。**終了直後に自動生成されるレポート（成立率・属性分布）が、主催者にとって次回の集客材料になる**ことが継続課金の根拠になる。Phase 2扱いだが、実質的にはこれがサブスクの商品性そのもの。Phase 1の簡易表示は「PDFで出せます（有料）」の導線として最初から作り込むこと。
+
+2. **最初の10社はデモモードで営業する前提で作る。**
+   地方・個人主催者は「当日うまくいかなかったらどうする」が最大の障壁。デモモードは機能検証ツールではなく**営業ツール**であり、スマホ1台で3分で一周できる完成度が必要。Phase 1に入れた判断は正しい。
+
+3. **参加者側のバイラルは結果画面が唯一の接点。**
+   参加者は無料ユーザーであり、彼らが「次もこのシステムの街コンに行きたい」と思うことが主催者への逆営業になる。Phase 3としているが、結果画面へのサービス名表示だけはPhase 1で入れてよい（実装コストほぼゼロ）。
+
+---
+
+*本ドキュメントは v1 → v2 → v2.1 → v3 のレビューを統合し、未決事項を確定させた版。以降の変更はこのファイルを直接更新すること。*
