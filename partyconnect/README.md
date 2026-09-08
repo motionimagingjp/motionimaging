@@ -26,11 +26,21 @@ supabase/
     0003_rpc.sql    トランザクションを要する操作（採番・確定・消去）
   functions/
     _shared/
-      matching.ts        最大重み二部マッチング（相互指名のみ・seedで再現性あり）
-      contact-filter.ts  連絡先記入のブロック
+    functions/
+      _shared/           純粋ロジック（Nodeでテスト可能にするため Deno API に依存させない）
+      checkin/           受付・引換コードとの交換・番号の採番
+      save_profile/      プロフィール保存（連絡先ブロック・性別は変更不可）
+      list_participants/ 閲覧一覧（参加者IDは返さない。★は開示フェーズ以降のみ）
+      submit_vote/       好印象・最終希望の投票（投稿者はトークンから解決）
+      get_result/        結果（成立時も番号とニックネームのみ）
+      finalize_event/    確定（マッチング→統計→配信）
+      purge/             消去（Cron一括・主催者の手動キック）
+      organizer/         進捗・枠発行・名簿・辞退・成立ペア・デモ投入
 tests/
   matching.test.ts       アルゴリズムの単体テスト
   contact-filter.test.ts フィルタの単体テスト
+  crypto.test.ts         自由記述の暗号化
+  analytics.test.ts      統計の集計と少人数カテゴリの丸め
   sql/
     00_supabase_shim.sql ローカル検証用の Supabase 相当環境（マイグレーションではない）
     10_security.test.sql RLS・RPC の挙動テスト
@@ -40,10 +50,22 @@ scripts/test-sql.sh      ローカル postgres を立ててSQLテストを実行
 ## テスト
 
 ```bash
-npm test          # 単体テスト + SQLテスト
-npm run test:unit # TypeScript のみ（node 22 の型ストリッピングを使うのでビルド不要）
-npm run test:sql  # ローカル postgres でマイグレーションとRLSを検証（要 postgresql-16）
+npm test               # 全部
+npm run test:unit      # 純粋ロジックの単体テスト（node 22 の型ストリッピングを使うのでビルド不要）
+npm run test:functions # Edge Function の型チェックと lint（要 deno）
+npm run test:sql       # ローカル postgres でマイグレーションとRLSを検証（要 postgresql-16）
 ```
+
+## 受付の導線（実装時に確定）
+
+参加者に性別を自己申告させない方針（仕様 6-5）のため、掲示QRからの完全セルフ登録は採用していない。
+
+1. 主催者が受付で参加者に **6桁の引換コード** を渡す（主催者画面に表示される）
+2. 参加者は掲示QR（または4桁パスコード）で受付ページを開き、引換コードを入力する
+3. 引換コードと交換に `session_token` を受け取り、そのままチェックインへ進む
+
+事前配布URLを受け取っている参加者は、URLに含まれる `session_token` でそのまま2をスキップできる。
+引換コードは `phase='checkin'` の間だけ有効で、Edge Function 側でイベント単位のレート制限をかけている。
 
 ## 権限モデル
 

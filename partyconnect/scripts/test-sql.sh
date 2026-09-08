@@ -27,10 +27,11 @@ psql -h "$PGHOST" -p "$PGPORT" -U postgres -q \
 
 echo "==> マイグレーションを適用します"
 psql -h "$PGHOST" -p "$PGPORT" -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q \
-     -f "$here/tests/sql/00_supabase_shim.sql" \
-     -f "$here/supabase/migrations/0001_init.sql" \
-     -f "$here/supabase/migrations/0002_rls.sql" \
-     -f "$here/supabase/migrations/0003_rpc.sql"
+     -f "$here/tests/sql/00_supabase_shim.sql"
+# マイグレーションは番号順に全部当てる。新しいファイルを足しても書き換え不要
+for migration in "$here"/supabase/migrations/*.sql; do
+    psql -h "$PGHOST" -p "$PGPORT" -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q -f "$migration"
+done
 
 echo "==> RLS / RPC テストを実行します"
 psql -h "$PGHOST" -p "$PGPORT" -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
