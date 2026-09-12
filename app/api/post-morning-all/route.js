@@ -674,10 +674,12 @@ function describeXError(err, text, attempts) {
 // ============================================================
 // ファイル名は連番だが 5桁・カテゴリごとに開始番号が違う実物に合わせる
 //   富士山: 00101, 00102, ...   花: 00201, 00202, ...   星: 00301, 00302, ...
+// ファイル名は「接頭辞（漢字）+ 5桁連番」の実物に合わせる
+//   花: 花00201.jpg〜   富士山: 富士00101.jpg〜   星: 星00301.jpg〜
 const IMAGE_CATEGORIES = {
-  flower: { path: 'flower', count: parseInt(process.env.FLOWER_IMAGE_COUNT || '17'), startNum: 201 },
-  fuji:   { path: 'fuji',   count: parseInt(process.env.FUJI_IMAGE_COUNT   || '11'), startNum: 101 },
-  star:   { path: 'star',   count: parseInt(process.env.STAR_IMAGE_COUNT  || '8'),  startNum: 301 },
+  flower: { path: 'flower', count: parseInt(process.env.FLOWER_IMAGE_COUNT || '17'), startNum: 201, prefix: '花' },
+  fuji:   { path: 'fuji',   count: parseInt(process.env.FUJI_IMAGE_COUNT   || '11'), startNum: 101, prefix: '富士' },
+  star:   { path: 'star',   count: parseInt(process.env.STAR_IMAGE_COUNT  || '8'),  startNum: 301, prefix: '星' },
 };
 
 function buildPhotoUrl(category, index) {
@@ -686,7 +688,7 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${num}.jpg`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
 }
 
 async function getNextPhotoIndex(category) {
@@ -702,19 +704,24 @@ async function getNextPhotoIndex(category) {
 // 失敗しても呼び出し元は「画像なしで投稿続行」にフォールバックできるよう
 // エラーはthrowせず null を返す。
 async function uploadPhotoToX(xClient, category, imageIndex) {
+  // 診断のため失敗理由を { mediaId, error, sizeMB } の形で返す（従来はnullのみで理由不明だった）
   try {
     const url = buildPhotoUrl(category, imageIndex);  // startNum + index で組み立てるため+1しない
     const res = await fetch(url);
     if (!res.ok) {
-      console.error(`画像取得失敗 [${category}] ${url} status=${res.status}`);
-      return null;
+      return { mediaId: null, error: `GitHub画像取得失敗 [HTTP ${res.status}] ${url}` };
     }
     const buffer = Buffer.from(await res.arrayBuffer());
-    const mediaId = await xClient.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
-    return mediaId;
+    const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+    try {
+      const mediaId = await xClient.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
+      return { mediaId, error: null, sizeMB };
+    } catch (uploadErr) {
+      // X側のアップロード拒否（5MB超過など）をここで捕捉する
+      return { mediaId: null, error: `X画像アップロード失敗(${sizeMB}MB): ${uploadErr.message}`, sizeMB };
+    }
   } catch (e) {
-    console.error(`画像アップロード失敗 [${category}]:`, e.message);
-    return null;
+    return { mediaId: null, error: `画像取得/変換エラー: ${e.message}` };
   }
 }
 
@@ -835,12 +842,14 @@ export async function GET(request) {
       const category = IMAGE_MAP[key];
       if (category && !noImage) {
         const { next, key: photoKey } = await getNextPhotoIndex(category);
-        mediaId = await uploadPhotoToX(xClient, category, next);
+        const up = await uploadPhotoToX(xClient, category, next);
+        mediaId = up.mediaId;
         photoMeta = { category, index: next, photoKey, uploaded: !!mediaId };
-        const shownNum = String(IMAGE_CATEGORIES[category].startNum + next).padStart(5, '0');
+        const catInfo = IMAGE_CATEGORIES[category];
+        const shownName = `${catInfo.prefix}${String(catInfo.startNum + next).padStart(5, '0')}.jpg`;
         report[`${key}_image`] = mediaId
-          ? `添付成功 (${category}/${shownNum}.jpg)`
-          : `添付失敗（画像なしで投稿続行） (${category}/${shownNum}.jpg)`;
+          ? `添付成功 (${category}/${shownName}, ${up.sizeMB}MB)`
+          : `添付失敗: ${up.error} (${category}/${shownName})`;
       }
 
       const r = await tweetWithRetry(xClient, text, 3, mediaId);
