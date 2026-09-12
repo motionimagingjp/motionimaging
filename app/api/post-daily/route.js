@@ -283,7 +283,7 @@ async function buildFujisanTweet(apiKey, dateLabel, weather, penalty, min, diag)
 // ============================================================
 // ファイル名は「接頭辞（漢字）+ 5桁連番」の実物に合わせる: 富士00101.jpg〜
 const IMAGE_CATEGORIES = {
-  fuji: { count: parseInt(process.env.FUJI_IMAGE_COUNT || '11'), startNum: 101, prefix: '富士' },
+  fuji: { count: parseInt(process.env.FUJI_IMAGE_COUNT || '11'), startNum: 101, prefix: '富士山' },
 };
 
 function buildPhotoUrl(category, index) {
