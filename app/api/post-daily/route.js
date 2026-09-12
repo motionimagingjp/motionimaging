@@ -281,8 +281,9 @@ async function buildFujisanTweet(apiKey, dateLabel, weather, penalty, min, diag)
 // ============================================================
 // 画像：富士山カテゴリのローテーション添付（雲海用の写真は未整備）
 // ============================================================
+// ファイル名は「接頭辞（漢字）+ 5桁連番」の実物に合わせる: 富士00101.jpg〜
 const IMAGE_CATEGORIES = {
-  fuji: { count: parseInt(process.env.FUJI_IMAGE_COUNT || '11'), startNum: 101 },
+  fuji: { count: parseInt(process.env.FUJI_IMAGE_COUNT || '11'), startNum: 101, prefix: '富士' },
 };
 
 function buildPhotoUrl(category, index) {
@@ -291,7 +292,7 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${num}.jpg`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
 }
 
 async function getNextPhotoIndex(category) {
@@ -304,15 +305,23 @@ async function getNextPhotoIndex(category) {
 }
 
 async function uploadPhotoToX(xClient, category, index) {
+  // 診断のため失敗理由を { mediaId, error, sizeMB } の形で返す
   try {
     const url = buildPhotoUrl(category, index);
     const res = await fetch(url);
-    if (!res.ok) { console.error(`画像取得失敗 [${category}] status=${res.status}`); return null; }
+    if (!res.ok) {
+      return { mediaId: null, error: `GitHub画像取得失敗 [HTTP ${res.status}] ${url}` };
+    }
     const buffer = Buffer.from(await res.arrayBuffer());
-    return await xClient.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
+    const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+    try {
+      const mediaId = await xClient.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
+      return { mediaId, error: null, sizeMB };
+    } catch (uploadErr) {
+      return { mediaId: null, error: `X画像アップロード失敗(${sizeMB}MB): ${uploadErr.message}`, sizeMB };
+    }
   } catch (e) {
-    console.error(`画像アップロード失敗 [${category}]:`, e.message);
-    return null;
+    return { mediaId: null, error: `画像取得/変換エラー: ${e.message}` };
   }
 }
 
@@ -468,12 +477,14 @@ export async function GET(request) {
       const category = IMAGE_MAP[key];
       if (category && !noImage) {
         const { next, key: photoKey } = await getNextPhotoIndex(category);
-        mediaId = await uploadPhotoToX(xClient, category, next);
+        const up = await uploadPhotoToX(xClient, category, next);
+        mediaId = up.mediaId;
         photoMeta = { category, index: next, photoKey, uploaded: !!mediaId };
-        const shownNum = String(IMAGE_CATEGORIES[category].startNum + next).padStart(5, '0');
+        const catInfo = IMAGE_CATEGORIES[category];
+        const shownName = `${catInfo.prefix}${String(catInfo.startNum + next).padStart(5, '0')}.jpg`;
         report[`${key}_image`] = mediaId
-          ? `添付成功 (${category}/${shownNum}.jpg)`
-          : `添付失敗（画像なしで投稿続行） (${category}/${shownNum}.jpg)`;
+          ? `添付成功 (${category}/${shownName}, ${up.sizeMB}MB)`
+          : `添付失敗: ${up.error} (${category}/${shownName})`;
       }
 
       const r = await tweetWithRetry(xClient, text, 3, mediaId);
