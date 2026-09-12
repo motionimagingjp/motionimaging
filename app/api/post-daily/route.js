@@ -181,9 +181,11 @@ async function buildSpotTweet(opts) {
     + '天気による指数補正：' + penalty + '%を差し引くこと。\n'
     + `条件：${kind === 'cloud' ? '実在する日本の山・高原3件' : '富士山周辺の実在する場所3件'}\n`
     + '【重要】スコアは天気補正を反映して必ず自分で計算すること。例示の数値をそのまま使わないこと。\n'
-    + 'スコアは整数（10〜100）。memoはスコアの傾向と矛盾しない内容で30文字以内。\n\n'
+    + 'スコアは整数（10〜100）。\n'
+    + 'スポット名は都道府県名を含めて10文字以内で簡潔に（例：高ボッチ高原(長野)）。\n'
+    + 'memoはスコアの傾向と矛盾しない内容で20文字以内。\n\n'
     + '次のスキーマのJSONのみで返答（マークダウン不要）：\n'
-    + `{"spots":[{"name":"<スポット名（都県名）>","emoji":"${emoji}","score":<整数>}],"time":"<最適時間帯>","memo":"<コメント>"}`;
+    + `{"spots":[{"name":"<10文字以内のスポット名>","emoji":"${emoji}","score":<整数>}],"time":"<最適時間帯>","memo":"<20文字以内のコメント>"}`;
 
   let parsed = null;
   try {
@@ -236,12 +238,16 @@ async function buildSpotTweet(opts) {
     return t;
   };
 
-  const plans = [[16, 30], [14, 20], [12, 0], [10, 0]];
+  // スポット3件・メモ1件という少ない要素数のため余裕がある。
+  // Geminiへの指示（名前10文字以内=重み20、メモ20文字以内=重み40）を
+  // 上回る余裕を持たせた予算にする。旧予算(16/30等)は実際の文字数より
+  // 小さすぎ、余裕があるのに不必要に途中で切れる不具合があったため修正。
+  const plans = [[24, 44], [20, 36], [16, 26], [13, 16], [11, 0]];
   for (const [nameW, memoW] of plans) {
     const t = build(nameW, memoW);
     if (weightedLength(t) <= X_TARGET) return t;
   }
-  return clipWeighted(build(8, 0), X_LIMIT);
+  return clipWeighted(build(9, 0), X_LIMIT);
 }
 
 async function buildCloudSeaTweet(apiKey, dateLabel, weather, penalty, min, diag) {
