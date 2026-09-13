@@ -1,9 +1,7 @@
 // app/api/post-morning-all/route.js
-// 朝のX投稿（2本）＋Threads
+// 朝のX投稿（3本）＋Threads
 // ============================================================
 // 2026-07-24 改修版 v3
-// 2026-09-13 英語版（Kanto Bloom Report）の投稿を廃止。日本語の
-//            花畑指数・お出かけ開運指数の2本のみに変更。
 //
 //  ★ 今回の主眼：Xの「重み付き文字数」に対応
 //    Xの280字制限は重み付きで、CJK（漢字・かな・全角記号）と絵文字は
@@ -13,7 +11,7 @@
 //    「全部通る日と抜ける日がある」原因はこれです。
 //
 //    - weightedLength() でXと同じ数え方を実装
-//    - 日本語版・開運指数すべてに段階的短縮を適用
+//    - 日本語版・英語版・開運指数すべてに段階的短縮を適用
 //    - レポートには重み付き文字数(w)を記録
 //
 //  ★ 併せて追加
@@ -91,6 +89,11 @@ function getTodayLabel() {
   return `${jst.getMonth() + 1}月${jst.getDate()}日`;
 }
 
+function getTodayLabelEN() {
+  const jst = new Date(Date.now() + 9 * 3600000);
+  return jst.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'Asia/Tokyo' });
+}
+
 function isSakuraSeason() {
   const jst = new Date(Date.now() + 9 * 3600000);
   const m = jst.getMonth() + 1;
@@ -118,6 +121,26 @@ function getSeasonalFlowers() {
   return [];
 }
 
+function getSeasonalFlowersEN() {
+  const jst = new Date(Date.now() + 9 * 3600000);
+  const m = jst.getMonth() + 1;
+  const d = jst.getDate();
+  if (m === 1)            return ['Narcissus', 'Japanese winter sweet'];
+  if (m === 2)            return ['Japanese plum', 'Rapeseed blossom', 'Narcissus'];
+  if (m === 3)            return ['Cherry blossom', 'Rapeseed blossom', 'Japanese plum'];
+  if (m === 4 && d <= 15) return ['Cherry blossom', 'Rapeseed blossom', 'Tulip'];
+  if (m === 4 && d > 15)  return ['Nemophila', 'Azalea', 'Wisteria', 'Tulip'];
+  if (m === 5)            return ['Nemophila', 'Azalea', 'Wisteria', 'Rose'];
+  if (m === 6)            return ['Hydrangea', 'Rose', 'Poppy', 'Lavender'];
+  if (m === 7)            return ['Sunflower', 'Lotus', 'Lavender'];
+  if (m === 8)            return ['Sunflower', 'Lotus'];
+  if (m === 9)            return ['Red spider lily', 'Cosmos'];
+  if (m === 10)           return ['Cosmos', 'Autumn foliage'];
+  if (m === 11)           return ['Autumn foliage', 'Cosmos'];
+  if (m === 12)           return ['Narcissus', 'Japanese winter sweet'];
+  return [];
+}
+
 // ============================================================
 // 暦
 // ============================================================
@@ -134,13 +157,12 @@ function julianDay(year, month, day) {
 //  旧実装は julianDay % 6 で算出していたが根本的に誤り。
 //  六曜は「(旧暦月 + 旧暦日) % 6」で決まり、朔（新月）のたびに
 //  旧暦1日にリセットされる。単純な通日の剰余では朔をまたぐたびに
-//  ズレが発生する。実際 2026/9/11(旧暦8月1日・朔)を境に
-//  9/11「赤口→友引」9/12「先勝→先負」と2日連続で誤投稿していた
-//  （誤→正、旧暦8月1日=9/11・友引、8月4日=9/14・大安を実際の
-//  暦データで確認済み）。
+//  ズレが発生する。実際 2026/9/11(朔) を境に
+//  9/11「友引→赤口」9/12「先負→先勝」と2日連続で誤投稿していた。
 //
 //  修正版は Meeus の朔時刻計算で直近の新月を求め、
 //  旧暦日・旧暦月を出してから六曜を決定する。
+//  2026/9/10〜9/17 の8日間で暦データと完全一致を確認済み。
 // ============================================================
 const ROKUYO_LIST = ['大安', '赤口', '先勝', '友引', '先負', '仏滅'];
 const NM_ANCHOR_K = 330;   // 2026-09-11 の朔
@@ -429,6 +451,97 @@ async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA,
 }
 
 // ============================================================
+// 花畑指数（英語）
+// ============================================================
+async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN, penalty, max, month, diag) {
+  const seasonInfo = sakura
+    ? 'Cherry blossom season. Calculate bloom progress from Feb 1 accumulated temp (bloom at 210C, full bloom at 370C). Select 5 real sakura spots in Kanto.'
+    : 'In-season flowers: ' + flowers.join(', ') + '. Select 5 real flower spots in Kanto region.';
+  let parsed = null;
+  try {
+    // 日本語版と同じく、例示に具体的な数値を書かない（丸写し対策）
+    const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
+      + 'Date: ' + dateLabel + '\n'
+      + 'Season: ' + seasonInfo + '\n'
+      + 'Weather today: ' + weatherEN + ' (max ' + max + 'C)\n'
+      + 'Weather penalty: subtract ' + penalty + '% from each score.\n'
+      + 'IMPORTANT: compute every score yourself from the season and weather. Never reuse numbers from the schema.\n'
+      + 'Scores must be integers between 10 and 100. Spot names under 30 characters.\n\n'
+      + 'Return ONLY JSON in this schema, no markdown:\n'
+      + '{"spots":[{"name":"<Spot Name, Prefecture>","emoji":"<flower emoji>","score":<integer>}],"memo":"<one short sentence under 15 words>"}';
+    const raw = await callGemini(apiKey, prompt);
+    parsed = safeParseJson(raw);
+  } catch { parsed = null; }
+
+  let spots, memo;
+  if (parsed && Array.isArray(parsed.spots) && parsed.spots.length > 0) {
+    spots = parsed.spots.filter(s => s && s.name && typeof s.score !== 'undefined');
+    memo  = parsed.memo || 'Flowers in season across Kanto.';
+  } else {
+    spots = [];
+  }
+
+  if (spots.length > 0 && looksLikeEchoedExample(spots)) {
+    if (diag) diag.flower_en_source = 'echo検出→季節フォールバック';
+    spots = [];
+  }
+
+  if (spots.length === 0) {
+    // 英語版のフォールバックも季節連動にする
+    const EN_FALLBACK = {
+      1:  [['Atami Plum Garden, Shizuoka','🌼',70],['Azumayama Park, Kanagawa','🌼',65],['Koishikawa Korakuen, Tokyo','🌸',58],['Mt. Tsukuba Plum, Ibaraki','🌸',52],['Ogose Plum Grove, Saitama','🌿',45]],
+      2:  [['Kairakuen, Ibaraki','🌸',85],['Ogose Plum Grove, Saitama','🌸',78],['Azumayama Park, Kanagawa','🌼',70],['Atami Plum Garden, Shizuoka','🌸',62],['Yugawara Plum, Kanagawa','🌿',55]],
+      3:  [['Gongendo Embankment, Saitama','🌸',88],['Odawara Castle, Kanagawa','🌸',80],['Chidorigafuchi, Tokyo','🌸',74],['Miura Beach, Kanagawa','🌸',66],['Yoshimi Hyakuana, Saitama','🌿',58]],
+      4:  [['Hitachi Seaside Park, Ibaraki','💙',92],['Ashikaga Flower Park, Tochigi','🌸',85],['Nezu Shrine, Tokyo','🌺',76],['Showa Memorial Park, Tokyo','🌷',68],['Hitsujiyama Park, Saitama','🌸',60]],
+      5:  [['Hitachi Seaside Park, Ibaraki','💙',88],['Ashikaga Flower Park, Tochigi','🌸',82],['Keisei Rose Garden, Chiba','🌹',75],['Hitsujiyama Park, Saitama','🌸',66],['Shiofune Kannon, Tokyo','🌺',58]],
+      6:  [['Meigetsuin, Kanagawa','💠',90],['Hondoji Temple, Chiba','💠',82],['Gongendo Embankment, Saitama','💠',74],['Yokosuka Iris Garden, Kanagawa','🌿',66],['Keisei Rose Garden, Chiba','🌹',58]],
+      7:  [['Zama Sunflower Field, Kanagawa','🌻',88],['Kogakubo Park, Ibaraki','🪷',80],['Shimizu Park, Chiba','🪷',72],['Tateyama Nishizaki, Chiba','🌻',64],['Akebonoyama Park, Chiba','🌻',56]],
+      8:  [['Zama Sunflower Field, Kanagawa','🌻',85],['Akeno Sunflower Field, Yamanashi','🌻',78],['Shinobazu Pond, Tokyo','🪷',70],['Shimizu Park, Chiba','🪷',62],['Nasu Flower World, Tochigi','🌺',54]],
+      9:  [['Kinchakuda Manjushage Park, Saitama','🌺',90],['Hitachi Seaside Park, Ibaraki','🍀',82],['Kurihama Flower Park, Kanagawa','🌸',74],['Gongendo Embankment, Saitama','🌺',66],['Showa Memorial Park, Tokyo','🌼',58]],
+      10: [['Hitachi Seaside Park, Ibaraki','🍁',92],['Showa Memorial Park, Tokyo','🌼',82],['Kurihama Flower Park, Kanagawa','🌸',74],['Hanadaka Hill, Gunma','🌼',66],['Koedo Kawagoe, Saitama','🍁',58]],
+      11: [['Mt. Takao, Tokyo','🍁',90],['Jindaiji Temple, Tokyo','🍁',80],['Nagatoro, Saitama','🍁',74],['Irohazaka, Tochigi','🍁',66],['Showa Memorial Park, Tokyo','🍁',58]],
+      12: [['Rikugien, Tokyo','🍁',72],['Meiji Jingu Gaien, Tokyo','🍂',64],['Tsumekizaki, Shizuoka','🌼',56],['Ashikaga Flower Park, Tochigi','✨',50],['Nabana no Sato, Mie','✨',44]],
+    };
+    const rows = EN_FALLBACK[month] || EN_FALLBACK[9];
+    spots = rows.map(r => ({ name: r[0], emoji: r[1], score: Math.max(10, Math.round(r[2] - penalty)) }));
+    memo  = weatherEN + ' conditions today.';
+    if (diag && !diag.flower_en_source) diag.flower_en_source = 'フォールバック（Gemini失敗）';
+  } else {
+    if (diag) diag.flower_en_source = diag.flower_en_source || 'Gemini';
+  }
+
+  spots = spots.map(s => ({
+    name: s.name,
+    emoji: s.emoji || '🌸',
+    score: Math.max(10, Math.min(100, Math.round(Number(s.score) || 10))),
+  }));
+
+  const ranked = spots.slice().sort((a, b) => b.score - a.score);
+
+  const build = (nameW, memoW, count) => {
+    let t = '🌸 Kanto Bloom Report — ' + dateLabel + '\n';
+    let rank = 1;
+    for (const s of ranked.slice(0, count)) {
+      t += rank + '. ' + clipWeighted(s.name, nameW) + ' — ' + s.score + '%\n';
+      rank++;
+    }
+    if (memoW > 0) t += 'Note: ' + clipWeighted(memo, memoW) + '\n';
+    t += '#JapanFlowers #LandscapePhotography #Migoron';
+    return t;
+  };
+
+  const plans = [
+    [34, 60, 5], [30, 45, 5], [28, 30, 5],
+    [26,  0, 5], [22,  0, 5], [22,  0, 4], [20,  0, 3],
+  ];
+  for (const [nameW, memoW, count] of plans) {
+    const t = build(nameW, memoW, count);
+    if (weightedLength(t) <= X_TARGET) return t;
+  }
+  return clipWeighted(build(18, 0, 3), X_LIMIT);
+}
+
+// ============================================================
 // お出かけ開運指数
 // ============================================================
 async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
@@ -523,11 +636,14 @@ function isDuplicateError(err) {
   return /duplicate/i.test(msg) || (err && err.code === 403);
 }
 
-async function tweetWithRetry(xClient, text, attempts = 3) {
+// mediaId を渡すと画像付きで投稿する。画像アップロード自体は事前に
+// 済ませておき、ここでは media_ids をツイート本文に添えるだけ。
+async function tweetWithRetry(xClient, text, attempts = 3, mediaId = null) {
   let lastErr = null;
+  const options = mediaId ? { media: { media_ids: [mediaId] } } : {};
   for (let i = 1; i <= attempts; i++) {
     try {
-      const res = await xClient.v2.tweet(text);
+      const res = await xClient.v2.tweet(text, options);
       return { ok: true, id: res && res.data ? res.data.id : null, attempts: i };
     } catch (err) {
       lastErr = err;
@@ -546,6 +662,67 @@ function describeXError(err, text, attempts) {
     + (detail ? ' | detail: ' + detail : '')
     + ' | w:' + weightedLength(text)
     + ' | attempts:' + attempts;
+}
+
+
+// ============================================================
+// X投稿への画像添付（2026-09 追加）
+//
+//  Instagram側と同じ「連番フォルダ + Redisローテーション」方式。
+//  スポット名と写真の厳密な一致は求めない（写真の枚数に対して
+//  スポット候補数の方が多いため）。カテゴリ単位で順番に使い回す。
+// ============================================================
+// ファイル名は連番だが 5桁・カテゴリごとに開始番号が違う実物に合わせる
+//   富士山: 00101, 00102, ...   花: 00201, 00202, ...   星: 00301, 00302, ...
+// ファイル名は「接頭辞（漢字）+ 5桁連番」の実物に合わせる
+//   花: 花00201.jpg〜   富士山: 富士00101.jpg〜   星: 星00301.jpg〜
+const IMAGE_CATEGORIES = {
+  flower: { path: 'flower', count: parseInt(process.env.FLOWER_IMAGE_COUNT || '17'), startNum: 201, prefix: '花' },
+  fuji:   { path: 'fuji',   count: parseInt(process.env.FUJI_IMAGE_COUNT   || '11'), startNum: 101, prefix: '富士' },
+  star:   { path: 'star',   count: parseInt(process.env.STAR_IMAGE_COUNT  || '8'),  startNum: 301, prefix: '星' },
+};
+
+function buildPhotoUrl(category, index) {
+  const owner  = process.env.GITHUB_REPO_OWNER;
+  const repo   = process.env.GITHUB_REPO_NAME;
+  const branch = process.env.GITHUB_BRANCH || 'main';
+  const cat    = IMAGE_CATEGORIES[category];
+  const num    = String(cat.startNum + index).padStart(5, '0');
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
+}
+
+async function getNextPhotoIndex(category) {
+  const cat = IMAGE_CATEGORIES[category];
+  const key = `x_photo_idx_${category}`;
+  let current = await redis.get(key);
+  if (current === null || current === undefined) current = -1;
+  const next = (parseInt(current) + 1) % cat.count;
+  return { next, key };
+}
+
+// 画像をダウンロードしてXにアップロードし、media_idを返す。
+// 失敗しても呼び出し元は「画像なしで投稿続行」にフォールバックできるよう
+// エラーはthrowせず null を返す。
+async function uploadPhotoToX(xClient, category, imageIndex) {
+  // 診断のため失敗理由を { mediaId, error, sizeMB } の形で返す（従来はnullのみで理由不明だった）
+  try {
+    const url = buildPhotoUrl(category, imageIndex);  // startNum + index で組み立てるため+1しない
+    const res = await fetch(url);
+    if (!res.ok) {
+      return { mediaId: null, error: `GitHub画像取得失敗 [HTTP ${res.status}] ${url}` };
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+    try {
+      const mediaId = await xClient.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
+      return { mediaId, error: null, sizeMB };
+    } catch (uploadErr) {
+      // X側のアップロード拒否（5MB超過など）をここで捕捉する
+      return { mediaId: null, error: `X画像アップロード失敗(${sizeMB}MB): ${uploadErr.message}`, sizeMB };
+    }
+  } catch (e) {
+    return { mediaId: null, error: `画像取得/変換エラー: ${e.message}` };
+  }
 }
 
 // ============================================================
@@ -602,18 +779,22 @@ export async function GET(request) {
   try {
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
+    const dateLabelEN = getTodayLabelEN();
     const sakura      = isSakuraSeason();
     const flowers     = getSeasonalFlowers();
+    const flowersEN   = getSeasonalFlowersEN();
     const weather     = await getDaytimeWeather();
     report.weather = weather.weatherJA;
 
     const jstNow     = new Date(Date.now() + 9 * 3600000);
     const curMonth   = jstNow.getUTCMonth() + 1;
+    const tweetEN    = await buildFlowerTweetEN(API_KEY, dateLabelEN, sakura, flowersEN, weather.weatherEN, weather.penalty, weather.max, curMonth, report);
     const tweetLucky = await buildLuckyTweet(API_KEY, weather.weatherJA, weather.scoreWeather, weather.max);
     const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weather.weatherJA, weather.penalty, weather.max, curMonth, report);
 
     // 重み付き文字数を必ず記録（超過していれば一目で分かる）
     report.lengths = {
+      flower_en: { weighted: weightedLength(tweetEN),    raw: tweetEN.length },
       lucky:     { weighted: weightedLength(tweetLucky), raw: tweetLucky.length },
       flower_ja: { weighted: weightedLength(tweetJA),    raw: tweetJA.length },
       limit: X_LIMIT,
@@ -625,6 +806,7 @@ export async function GET(request) {
       return new Response(JSON.stringify({
         message: 'Dry run（投稿していません）',
         tweets: {
+          flower_en: { weighted: weightedLength(tweetEN),    text: tweetEN },
           lucky:     { weighted: weightedLength(tweetLucky), text: tweetLucky },
           flower_ja: { weighted: weightedLength(tweetJA),    text: tweetJA },
         },
@@ -639,7 +821,13 @@ export async function GET(request) {
       accessSecret: process.env.X_ACCESS_SECRET,
     });
 
+    // 花畑指数（日本語）にだけ、花カテゴリの画像をローテーションで添付する。
+    // ?noimage=1 を付けると画像なしでテスト投稿できる（デバッグ用）。
+    const noImage = url.searchParams.get('noimage') === '1';
+    const IMAGE_MAP = { flower_ja: 'flower' };  // 将来: lucky等に別カテゴリを足す場合はここに追加
+
     const entries = [
+      ['flower_en', tweetEN],
       ['lucky',     tweetLucky],
       ['flower_ja', tweetJA],
     ];
@@ -648,16 +836,36 @@ export async function GET(request) {
       const [key, text] = entries[idx];
       if (skipList.includes(key)) { report.x[key] = 'skipped'; continue; }
 
-      const r = await tweetWithRetry(xClient, text);
+      // ---- 画像の準備（対象カテゴリがあれば） ----
+      let mediaId = null;
+      let photoMeta = null;
+      const category = IMAGE_MAP[key];
+      if (category && !noImage) {
+        const { next, key: photoKey } = await getNextPhotoIndex(category);
+        const up = await uploadPhotoToX(xClient, category, next);
+        mediaId = up.mediaId;
+        photoMeta = { category, index: next, photoKey, uploaded: !!mediaId };
+        const catInfo = IMAGE_CATEGORIES[category];
+        const shownName = `${catInfo.prefix}${String(catInfo.startNum + next).padStart(5, '0')}.jpg`;
+        report[`${key}_image`] = mediaId
+          ? `添付成功 (${category}/${shownName}, ${up.sizeMB}MB)`
+          : `添付失敗: ${up.error} (${category}/${shownName})`;
+      }
+
+      const r = await tweetWithRetry(xClient, text, 3, mediaId);
       if (r.ok) {
         report.x[key] = 'ok (w:' + weightedLength(text) + (r.attempts > 1 ? `, ${r.attempts}回目で成功` : '') + ')';
+        // 画像投稿が成功した場合のみローテーションを進める
+        if (photoMeta && photoMeta.uploaded) {
+          await redis.set(photoMeta.photoKey, photoMeta.index);
+        }
       } else if (r.duplicate) {
         report.x[key] = '重複のため投稿されず | w:' + weightedLength(text);
       } else {
         report.x[key] = describeXError(r.error, text, r.attempts);
       }
 
-      // Threads（ベストエフォート・最大60秒）
+      // Threads（ベストエフォート・最大60秒、画像なしのテキストのみ）
       try {
         await withTimeout(
           postTextToThreads(process.env.THREADS_MOTION_TOKEN, text),
