@@ -1,7 +1,9 @@
 // app/api/post-morning-all/route.js
-// 朝のX投稿（3本）＋Threads
+// 朝のX投稿（2本）＋Threads
 // ============================================================
 // 2026-07-24 改修版 v3
+// 2026-09-13 英語版（Kanto Bloom Report）の投稿を廃止。日本語の
+//            花畑指数・お出かけ開運指数の2本のみに変更。
 //
 //  ★ 今回の主眼：Xの「重み付き文字数」に対応
 //    Xの280字制限は重み付きで、CJK（漢字・かな・全角記号）と絵文字は
@@ -11,7 +13,7 @@
 //    「全部通る日と抜ける日がある」原因はこれです。
 //
 //    - weightedLength() でXと同じ数え方を実装
-//    - 日本語版・英語版・開運指数すべてに段階的短縮を適用
+//    - 日本語版・開運指数すべてに段階的短縮を適用
 //    - レポートには重み付き文字数(w)を記録
 //
 //  ★ 併せて追加
@@ -89,11 +91,6 @@ function getTodayLabel() {
   return `${jst.getMonth() + 1}月${jst.getDate()}日`;
 }
 
-function getTodayLabelEN() {
-  const jst = new Date(Date.now() + 9 * 3600000);
-  return jst.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'Asia/Tokyo' });
-}
-
 function isSakuraSeason() {
   const jst = new Date(Date.now() + 9 * 3600000);
   const m = jst.getMonth() + 1;
@@ -118,26 +115,6 @@ function getSeasonalFlowers() {
   if (m === 10)           return ['コスモス', '紅葉'];
   if (m === 11)           return ['紅葉', 'コスモス'];
   if (m === 12)           return ['水仙', '蝋梅'];
-  return [];
-}
-
-function getSeasonalFlowersEN() {
-  const jst = new Date(Date.now() + 9 * 3600000);
-  const m = jst.getMonth() + 1;
-  const d = jst.getDate();
-  if (m === 1)            return ['Narcissus', 'Japanese winter sweet'];
-  if (m === 2)            return ['Japanese plum', 'Rapeseed blossom', 'Narcissus'];
-  if (m === 3)            return ['Cherry blossom', 'Rapeseed blossom', 'Japanese plum'];
-  if (m === 4 && d <= 15) return ['Cherry blossom', 'Rapeseed blossom', 'Tulip'];
-  if (m === 4 && d > 15)  return ['Nemophila', 'Azalea', 'Wisteria', 'Tulip'];
-  if (m === 5)            return ['Nemophila', 'Azalea', 'Wisteria', 'Rose'];
-  if (m === 6)            return ['Hydrangea', 'Rose', 'Poppy', 'Lavender'];
-  if (m === 7)            return ['Sunflower', 'Lotus', 'Lavender'];
-  if (m === 8)            return ['Sunflower', 'Lotus'];
-  if (m === 9)            return ['Red spider lily', 'Cosmos'];
-  if (m === 10)           return ['Cosmos', 'Autumn foliage'];
-  if (m === 11)           return ['Autumn foliage', 'Cosmos'];
-  if (m === 12)           return ['Narcissus', 'Japanese winter sweet'];
   return [];
 }
 
@@ -452,97 +429,6 @@ async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA,
 }
 
 // ============================================================
-// 花畑指数（英語）
-// ============================================================
-async function buildFlowerTweetEN(apiKey, dateLabel, sakura, flowers, weatherEN, penalty, max, month, diag) {
-  const seasonInfo = sakura
-    ? 'Cherry blossom season. Calculate bloom progress from Feb 1 accumulated temp (bloom at 210C, full bloom at 370C). Select 5 real sakura spots in Kanto.'
-    : 'In-season flowers: ' + flowers.join(', ') + '. Select 5 real flower spots in Kanto region.';
-  let parsed = null;
-  try {
-    // 日本語版と同じく、例示に具体的な数値を書かない（丸写し対策）
-    const prompt = 'Calculate Migoron Index for 5 flower spots in Kanto, Japan.\n'
-      + 'Date: ' + dateLabel + '\n'
-      + 'Season: ' + seasonInfo + '\n'
-      + 'Weather today: ' + weatherEN + ' (max ' + max + 'C)\n'
-      + 'Weather penalty: subtract ' + penalty + '% from each score.\n'
-      + 'IMPORTANT: compute every score yourself from the season and weather. Never reuse numbers from the schema.\n'
-      + 'Scores must be integers between 10 and 100. Spot names under 30 characters.\n\n'
-      + 'Return ONLY JSON in this schema, no markdown:\n'
-      + '{"spots":[{"name":"<Spot Name, Prefecture>","emoji":"<flower emoji>","score":<integer>}],"memo":"<one short sentence under 15 words>"}';
-    const raw = await callGemini(apiKey, prompt);
-    parsed = safeParseJson(raw);
-  } catch { parsed = null; }
-
-  let spots, memo;
-  if (parsed && Array.isArray(parsed.spots) && parsed.spots.length > 0) {
-    spots = parsed.spots.filter(s => s && s.name && typeof s.score !== 'undefined');
-    memo  = parsed.memo || 'Flowers in season across Kanto.';
-  } else {
-    spots = [];
-  }
-
-  if (spots.length > 0 && looksLikeEchoedExample(spots)) {
-    if (diag) diag.flower_en_source = 'echo検出→季節フォールバック';
-    spots = [];
-  }
-
-  if (spots.length === 0) {
-    // 英語版のフォールバックも季節連動にする
-    const EN_FALLBACK = {
-      1:  [['Atami Plum Garden, Shizuoka','🌼',70],['Azumayama Park, Kanagawa','🌼',65],['Koishikawa Korakuen, Tokyo','🌸',58],['Mt. Tsukuba Plum, Ibaraki','🌸',52],['Ogose Plum Grove, Saitama','🌿',45]],
-      2:  [['Kairakuen, Ibaraki','🌸',85],['Ogose Plum Grove, Saitama','🌸',78],['Azumayama Park, Kanagawa','🌼',70],['Atami Plum Garden, Shizuoka','🌸',62],['Yugawara Plum, Kanagawa','🌿',55]],
-      3:  [['Gongendo Embankment, Saitama','🌸',88],['Odawara Castle, Kanagawa','🌸',80],['Chidorigafuchi, Tokyo','🌸',74],['Miura Beach, Kanagawa','🌸',66],['Yoshimi Hyakuana, Saitama','🌿',58]],
-      4:  [['Hitachi Seaside Park, Ibaraki','💙',92],['Ashikaga Flower Park, Tochigi','🌸',85],['Nezu Shrine, Tokyo','🌺',76],['Showa Memorial Park, Tokyo','🌷',68],['Hitsujiyama Park, Saitama','🌸',60]],
-      5:  [['Hitachi Seaside Park, Ibaraki','💙',88],['Ashikaga Flower Park, Tochigi','🌸',82],['Keisei Rose Garden, Chiba','🌹',75],['Hitsujiyama Park, Saitama','🌸',66],['Shiofune Kannon, Tokyo','🌺',58]],
-      6:  [['Meigetsuin, Kanagawa','💠',90],['Hondoji Temple, Chiba','💠',82],['Gongendo Embankment, Saitama','💠',74],['Yokosuka Iris Garden, Kanagawa','🌿',66],['Keisei Rose Garden, Chiba','🌹',58]],
-      7:  [['Zama Sunflower Field, Kanagawa','🌻',88],['Kogakubo Park, Ibaraki','🪷',80],['Shimizu Park, Chiba','🪷',72],['Tateyama Nishizaki, Chiba','🌻',64],['Akebonoyama Park, Chiba','🌻',56]],
-      8:  [['Zama Sunflower Field, Kanagawa','🌻',85],['Akeno Sunflower Field, Yamanashi','🌻',78],['Shinobazu Pond, Tokyo','🪷',70],['Shimizu Park, Chiba','🪷',62],['Nasu Flower World, Tochigi','🌺',54]],
-      9:  [['Kinchakuda Manjushage Park, Saitama','🌺',90],['Hitachi Seaside Park, Ibaraki','🍀',82],['Kurihama Flower Park, Kanagawa','🌸',74],['Gongendo Embankment, Saitama','🌺',66],['Showa Memorial Park, Tokyo','🌼',58]],
-      10: [['Hitachi Seaside Park, Ibaraki','🍁',92],['Showa Memorial Park, Tokyo','🌼',82],['Kurihama Flower Park, Kanagawa','🌸',74],['Hanadaka Hill, Gunma','🌼',66],['Koedo Kawagoe, Saitama','🍁',58]],
-      11: [['Mt. Takao, Tokyo','🍁',90],['Jindaiji Temple, Tokyo','🍁',80],['Nagatoro, Saitama','🍁',74],['Irohazaka, Tochigi','🍁',66],['Showa Memorial Park, Tokyo','🍁',58]],
-      12: [['Rikugien, Tokyo','🍁',72],['Meiji Jingu Gaien, Tokyo','🍂',64],['Tsumekizaki, Shizuoka','🌼',56],['Ashikaga Flower Park, Tochigi','✨',50],['Nabana no Sato, Mie','✨',44]],
-    };
-    const rows = EN_FALLBACK[month] || EN_FALLBACK[9];
-    spots = rows.map(r => ({ name: r[0], emoji: r[1], score: Math.max(10, Math.round(r[2] - penalty)) }));
-    memo  = weatherEN + ' conditions today.';
-    if (diag && !diag.flower_en_source) diag.flower_en_source = 'フォールバック（Gemini失敗）';
-  } else {
-    if (diag) diag.flower_en_source = diag.flower_en_source || 'Gemini';
-  }
-
-  spots = spots.map(s => ({
-    name: s.name,
-    emoji: s.emoji || '🌸',
-    score: Math.max(10, Math.min(100, Math.round(Number(s.score) || 10))),
-  }));
-
-  const ranked = spots.slice().sort((a, b) => b.score - a.score);
-
-  const build = (nameW, memoW, count) => {
-    let t = '🌸 Kanto Bloom Report — ' + dateLabel + '\n';
-    let rank = 1;
-    for (const s of ranked.slice(0, count)) {
-      t += rank + '. ' + clipWeighted(s.name, nameW) + ' — ' + s.score + '%\n';
-      rank++;
-    }
-    if (memoW > 0) t += 'Note: ' + clipWeighted(memo, memoW) + '\n';
-    t += '#JapanFlowers #LandscapePhotography #Migoron';
-    return t;
-  };
-
-  const plans = [
-    [34, 60, 5], [30, 45, 5], [28, 30, 5],
-    [26,  0, 5], [22,  0, 5], [22,  0, 4], [20,  0, 3],
-  ];
-  for (const [nameW, memoW, count] of plans) {
-    const t = build(nameW, memoW, count);
-    if (weightedLength(t) <= X_TARGET) return t;
-  }
-  return clipWeighted(build(18, 0, 3), X_LIMIT);
-}
-
-// ============================================================
 // お出かけ開運指数
 // ============================================================
 async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
@@ -716,22 +602,18 @@ export async function GET(request) {
   try {
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
-    const dateLabelEN = getTodayLabelEN();
     const sakura      = isSakuraSeason();
     const flowers     = getSeasonalFlowers();
-    const flowersEN   = getSeasonalFlowersEN();
     const weather     = await getDaytimeWeather();
     report.weather = weather.weatherJA;
 
     const jstNow     = new Date(Date.now() + 9 * 3600000);
     const curMonth   = jstNow.getUTCMonth() + 1;
-    const tweetEN    = await buildFlowerTweetEN(API_KEY, dateLabelEN, sakura, flowersEN, weather.weatherEN, weather.penalty, weather.max, curMonth, report);
     const tweetLucky = await buildLuckyTweet(API_KEY, weather.weatherJA, weather.scoreWeather, weather.max);
     const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weather.weatherJA, weather.penalty, weather.max, curMonth, report);
 
     // 重み付き文字数を必ず記録（超過していれば一目で分かる）
     report.lengths = {
-      flower_en: { weighted: weightedLength(tweetEN),    raw: tweetEN.length },
       lucky:     { weighted: weightedLength(tweetLucky), raw: tweetLucky.length },
       flower_ja: { weighted: weightedLength(tweetJA),    raw: tweetJA.length },
       limit: X_LIMIT,
@@ -743,7 +625,6 @@ export async function GET(request) {
       return new Response(JSON.stringify({
         message: 'Dry run（投稿していません）',
         tweets: {
-          flower_en: { weighted: weightedLength(tweetEN),    text: tweetEN },
           lucky:     { weighted: weightedLength(tweetLucky), text: tweetLucky },
           flower_ja: { weighted: weightedLength(tweetJA),    text: tweetJA },
         },
@@ -759,7 +640,6 @@ export async function GET(request) {
     });
 
     const entries = [
-      ['flower_en', tweetEN],
       ['lucky',     tweetLucky],
       ['flower_ja', tweetJA],
     ];
