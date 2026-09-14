@@ -8,7 +8,14 @@
 // 繋ぎ：動的生成が失敗した場合、立ち上げ用の静的JSON（tweets.json）にフォールバック
 //       （スクアドの idx/cycle ローテーション方式を流用）
 //
-// ?key= / ?dry=1 / ?force=1 / ?report=1 に対応（Migoron・スクアドと同じ運用パターン）
+// ?key= / ?dry=1 / ?force=1 / ?report=1 / ?noimage=1 に対応（Migoron・スクアドと同じ運用パターン）
+//
+// 2026-09-14 追加：「ノーコード×生成AI開発 30日振り返り」企画（夜枠の2件目、
+// runJakeAIDiary）にのみ、Jake自身が用意した汎用AIイラスト画像
+// （app/api/post-images/jake-ai/）をローテーションで添付する機能を追加。
+// 朝・夜のメイン投稿（runJakeAI）は対象外。Migoronの画像添付と同じ設計
+// （Redisで次に使う画像indexを管理、成功後にのみ進める、失敗しても投稿自体は
+// 続行するフォールバック）。
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
@@ -121,11 +128,12 @@ function isDuplicateError(err) {
   return /duplicate/i.test(msg);
 }
 
-async function tweetWithRetry(xClient, text, attempts = 3) {
+async function tweetWithRetry(xClient, text, attempts = 3, mediaId = null) {
   let lastErr = null;
+  const options = mediaId ? { media: { media_ids: [mediaId] } } : {};
   for (let i = 1; i <= attempts; i++) {
     try {
-      const res = await xClient.v2.tweet(text);
+      const res = await xClient.v2.tweet(text, options);
       return { ok: true, id: res && res.data ? res.data.id : null, attempts: i };
     } catch (err) {
       lastErr = err;
@@ -311,6 +319,64 @@ async function pushHistory(slot, topic) {
   const history = await getHistory(slot);
   history.push(topic);
   await redis.set(slot.historyKey, JSON.stringify(history.slice(-HISTORY_DAYS)));
+}
+
+// ============================================================
+// 画像：汎用AIイラスト画像のローテーション添付
+//   （「30日振り返り」企画(runJakeAIDiary)のみが対象。朝・夜のメイン投稿は対象外）
+//
+// ファイル名は実物に合わせる（要確認済み）：
+//   AI00001.JPG 〜 AI00008.JPG（拡張子は大文字.JPG、5桁ゼロ埋め連番）
+// ============================================================
+const IMAGE_CATEGORY = {
+  path:     'jake-ai',
+  prefix:   'AI',
+  ext:      '.JPG',
+  startNum: 1,
+  count:    parseInt(process.env.JAKE_AI_IMAGE_COUNT || '8'),
+};
+const PHOTO_IDX_KEY = 'jake_ai_photo_idx';
+
+function buildPhotoUrl(index) {
+  const owner  = process.env.GITHUB_REPO_OWNER;
+  const repo   = process.env.GITHUB_REPO_NAME;
+  const branch = process.env.GITHUB_BRANCH || 'main';
+  const num    = String(IMAGE_CATEGORY.startNum + index).padStart(5, '0');
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${IMAGE_CATEGORY.path}/${IMAGE_CATEGORY.prefix}${num}${IMAGE_CATEGORY.ext}`;
+}
+
+function photoFileName(index) {
+  const num = String(IMAGE_CATEGORY.startNum + index).padStart(5, '0');
+  return `${IMAGE_CATEGORY.prefix}${num}${IMAGE_CATEGORY.ext}`;
+}
+
+async function getNextPhotoIndex() {
+  let current = await redis.get(PHOTO_IDX_KEY);
+  if (current === null || current === undefined) current = -1;
+  return (parseInt(current) + 1) % IMAGE_CATEGORY.count;
+}
+
+// 画像をダウンロードしてXにアップロードし、media_idを返す。
+// 失敗しても呼び出し元は「画像なしで投稿続行」にフォールバックできるよう
+// エラーはthrowせず null を返す（Migoronと同じ設計）。
+async function uploadPhotoToX(xClient, index) {
+  try {
+    const url = buildPhotoUrl(index);
+    const res = await fetch(url);
+    if (!res.ok) {
+      return { mediaId: null, error: `GitHub画像取得失敗 [HTTP ${res.status}] ${url}` };
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+    try {
+      const mediaId = await xClient.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
+      return { mediaId, error: null, sizeMB };
+    } catch (uploadErr) {
+      return { mediaId: null, error: `X画像アップロード失敗(${sizeMB}MB): ${uploadErr.message}`, sizeMB };
+    }
+  } catch (e) {
+    return { mediaId: null, error: `画像取得/変換エラー: ${e.message}` };
+  }
 }
 
 // ============================================================
@@ -531,9 +597,10 @@ export async function runJakeAIDiary(request) {
     }
   }
 
-  const dryRun = url.searchParams.get('dry') === '1';
-  const force  = url.searchParams.get('force') === '1';
-  const today  = getDateStringJST();
+  const dryRun  = url.searchParams.get('dry') === '1';
+  const force   = url.searchParams.get('force') === '1';
+  const noImage = url.searchParams.get('noimage') === '1';
+  const today   = getDateStringJST();
   const report = { dryRun, startedAt: new Date().toISOString() };
 
   try {
@@ -578,11 +645,26 @@ export async function runJakeAIDiary(request) {
       accessSecret: process.env.JAKE_X_ACCESS_SECRET,
     });
 
-    const r = await tweetWithRetry(xClient, text);
+    // 汎用AIイラスト画像をローテーションで添付（?noimage=1でスキップ可能）
+    let mediaId = null;
+    let photoIdx = null;
+    if (!noImage) {
+      photoIdx = await getNextPhotoIndex();
+      const up = await uploadPhotoToX(xClient, photoIdx);
+      mediaId = up.mediaId;
+      const shownName = photoFileName(photoIdx);
+      report.image = mediaId
+        ? `添付成功 (${shownName}, ${up.sizeMB}MB)`
+        : `添付失敗: ${up.error} (${shownName})`;
+    }
+
+    const r = await tweetWithRetry(xClient, text, 3, mediaId);
 
     if (r.ok || r.duplicate) {
       await redis.set(DIARY_IDX_KEY, idx + 1);
       await redis.set(DIARY_POSTED_KEY, today, { ex: 82800 });
+      // 画像添付が成功した投稿の場合のみローテーションを進める
+      if (r.ok && mediaId) await redis.set(PHOTO_IDX_KEY, photoIdx);
       report.result = r.ok ? 'ok' : '重複のため投稿されず（状態は進めた）';
       if (r.ok) {
         report.tweetId = r.id;
