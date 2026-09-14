@@ -13,7 +13,14 @@
 //  - Redisカウンタは投稿成功後に更新
 //  - weightedLength() で投稿前チェック（超過はスキップしてレポート）
 //  - X投稿は自動リトライ最大3回・重複403は再試行しない
-//  - ?key= / ?dry=1 / ?force=1 / ?report=1 に対応
+//  - ?key= / ?dry=1 / ?force=1 / ?report=1 / ?noimage=1 に対応
+//
+// 2026-09-14 追加：夜枠(night)のみ、Gemini生成の恋愛・婚活シーン画像
+// （app/api/post-images/scad-night/01.jpg〜08.jpg）をローテーションで
+// 添付する機能を追加。朝枠・朝2本目・宣伝枠は対象外。カテゴリ分けせず
+// 単純に8枚を順送りし、投稿本文の内容とは連動させない（Migoronの
+// uploadPhotoToXと同じ設計：投稿成功後にのみindexを進める、画像取得/
+// アップロードに失敗してもテキストのみで投稿続行）。
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
@@ -56,6 +63,7 @@ const SLOTS = {
     cycleKey: 'sukuado_night_cycle',
     postedKey: 'sukuado_night_posted',
     reportKey: 'sukuado_night_report',
+    hasImage: true, // 夜枠のみ画像添付の対象
   },
   promo: {
     // 宣伝ツイート：固定3パターンをローテーション（夜枠の後、22:01頃）
@@ -130,11 +138,12 @@ function isDuplicateError(err) {
   return /duplicate/i.test(msg) || (err && err.code === 403);
 }
 
-async function tweetWithRetry(xClient, text, attempts = 3) {
+async function tweetWithRetry(xClient, text, attempts = 3, mediaId = null) {
   let lastErr = null;
+  const options = mediaId ? { media: { media_ids: [mediaId] } } : {};
   for (let i = 1; i <= attempts; i++) {
     try {
-      const res = await xClient.v2.tweet(text);
+      const res = await xClient.v2.tweet(text, options);
       return { ok: true, id: res && res.data ? res.data.id : null, attempts: i };
     } catch (err) {
       lastErr = err;
@@ -186,6 +195,60 @@ function getDateStringJST() {
 }
 
 // ============================================================
+// 画像：夜枠のみ、恋愛・婚活シーン画像のローテーション添付
+//   カテゴリ分けせず01.jpg〜08.jpgを単純に順送りする（投稿本文の
+//   内容とは連動させない）。朝枠・朝2本目・宣伝枠は対象外。
+// ============================================================
+const NIGHT_IMAGE = {
+  path:     'scad-night',
+  ext:      '.jpg',
+  startNum: 1,
+  count:    parseInt(process.env.SCAD_NIGHT_IMAGE_COUNT || '8'),
+};
+const NIGHT_PHOTO_IDX_KEY = 'sukuado_night_photo_idx';
+
+function buildPhotoUrl(index) {
+  const owner  = process.env.GITHUB_REPO_OWNER;
+  const repo   = process.env.GITHUB_REPO_NAME;
+  const branch = process.env.GITHUB_BRANCH || 'main';
+  const num    = String(NIGHT_IMAGE.startNum + index).padStart(2, '0');
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${NIGHT_IMAGE.path}/${num}${NIGHT_IMAGE.ext}`;
+}
+
+function photoFileName(index) {
+  return `${String(NIGHT_IMAGE.startNum + index).padStart(2, '0')}${NIGHT_IMAGE.ext}`;
+}
+
+async function getNextPhotoIndex() {
+  let current = await redis.get(NIGHT_PHOTO_IDX_KEY);
+  if (current === null || current === undefined) current = -1;
+  return (parseInt(current) + 1) % NIGHT_IMAGE.count;
+}
+
+// 画像をダウンロードしてXにアップロードし、media_idを返す。
+// 失敗しても呼び出し元は「画像なしで投稿続行」にフォールバックできるよう
+// エラーはthrowせず null を返す（Migoronと同じ設計）。
+async function uploadPhotoToX(xClient, index) {
+  try {
+    const url = buildPhotoUrl(index);
+    const res = await fetch(url);
+    if (!res.ok) {
+      return { mediaId: null, error: `GitHub画像取得失敗 [HTTP ${res.status}] ${url}` };
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+    try {
+      const mediaId = await xClient.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
+      return { mediaId, error: null, sizeMB };
+    } catch (uploadErr) {
+      return { mediaId: null, error: `X画像アップロード失敗(${sizeMB}MB): ${uploadErr.message}`, sizeMB };
+    }
+  } catch (e) {
+    return { mediaId: null, error: `画像取得/変換エラー: ${e.message}` };
+  }
+}
+
+// ============================================================
 // メイン：runSukuado(request, slotName)
 // ============================================================
 export async function runSukuado(request, slotName) {
@@ -209,11 +272,12 @@ export async function runSukuado(request, slotName) {
   // ?report=1 → 前回レポートを表示（投稿しない）
   if (url.searchParams.get('report') === '1') {
     try {
-      const [rep, idx, cycle, posted] = await Promise.all([
+      const [rep, idx, cycle, posted, photoIdx] = await Promise.all([
         redis.get(slot.reportKey),
         redis.get(slot.idxKey),
         redis.get(slot.cycleKey),
         redis.get(slot.postedKey),
+        slot.hasImage ? redis.get(NIGHT_PHOTO_IDX_KEY) : Promise.resolve(null),
       ]);
       const parsed = typeof rep === 'string' ? JSON.parse(rep) : rep;
       return new Response(JSON.stringify({
@@ -223,6 +287,7 @@ export async function runSukuado(request, slotName) {
           nextIndex: idx ?? '(未設定=0から)',
           cycle: cycle ?? 0,
           lastPostedDate: posted ?? '(記録なし)',
+          ...(slot.hasImage ? { nextPhotoIndex: photoIdx ?? '(未設定=0から)' } : {}),
         },
       }, null, 2), { status: 200, headers: jsonHeaders });
     } catch (e) {
@@ -248,9 +313,10 @@ export async function runSukuado(request, slotName) {
     }
   }
 
-  const dryRun = url.searchParams.get('dry') === '1';
-  const force  = url.searchParams.get('force') === '1';
-  const today  = getDateStringJST();
+  const dryRun  = url.searchParams.get('dry') === '1';
+  const force   = url.searchParams.get('force') === '1';
+  const noImage = url.searchParams.get('noimage') === '1';
+  const today   = getDateStringJST();
 
   // カテゴリ分散した投稿順（決定的）
   const ordered = interleaveByCategory(slot.data.items);
@@ -323,7 +389,20 @@ export async function runSukuado(request, slotName) {
       accessSecret: process.env.SCAD_X_ACCESS_SECRET,
     });
 
-    const r = await tweetWithRetry(xClient, text);
+    // 夜枠のみ、恋愛・婚活シーン画像をローテーションで添付（?noimage=1でスキップ可能）
+    let mediaId = null;
+    let photoIdx = null;
+    if (slot.hasImage && !noImage) {
+      photoIdx = await getNextPhotoIndex();
+      const up = await uploadPhotoToX(xClient, photoIdx);
+      mediaId = up.mediaId;
+      const shownName = photoFileName(photoIdx);
+      report.image = mediaId
+        ? `添付成功 (${shownName}, ${up.sizeMB}MB)`
+        : `添付失敗: ${up.error} (${shownName})`;
+    }
+
+    const r = await tweetWithRetry(xClient, text, 3, mediaId);
 
     if (r.ok) {
       // 成功後にカウンタ更新（成功前に進めない）
@@ -335,6 +414,9 @@ export async function runSukuado(request, slotName) {
         await redis.set(slot.cycleKey, cycle);
         report.cycleCompleted = cycle;
       }
+      // 画像添付が成功した投稿の場合のみ、画像側のローテーションを進める
+      // （文面のidx/cycleとは完全に独立したカウンタ）
+      if (mediaId) await redis.set(NIGHT_PHOTO_IDX_KEY, photoIdx);
       report.result = 'ok';
       report.tweetId = r.id;
       report.nextIndex = nextIdx;
