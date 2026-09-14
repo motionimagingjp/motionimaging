@@ -4,6 +4,9 @@
 // 2026-07-24 改修版 v3
 // 2026-09-13 英語版（Kanto Bloom Report）の投稿を廃止。日本語の
 //            花畑指数・お出かけ開運指数の2本のみに変更。
+// 2026-09-14 当日重複防止（SET NXによる原子的な予約）を追加。post-daily
+//            で雲海指数が2回投稿された事故と同型の穴がこのファイルにも
+//            あったため（そもそも当日重複チェック自体が無かった）。
 //
 //  ★ 今回の主眼：Xの「重み付き文字数」に対応
 //    Xの280字制限は重み付きで、CJK（漢字・かな・全角記号）と絵文字は
@@ -26,7 +29,8 @@
 //  クエリパラメータ
 //    ?key=CRON_SECRET  … ブラウザから直接実行
 //    ?report=1         … 前回の実行レポートを表示（投稿しない）
-//    ?dry=1            … 投稿せず本文と重み付き文字数を確認
+//    ?dry=1            … 投稿せず本文と重み付き文字数を確認（重複予約の対象外）
+//    ?force=1          … 当日の重複チェックを無視して強制実行
 //    ?skip=lucky,...   … 個別スキップ
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
@@ -631,14 +635,16 @@ export async function GET(request) {
   // ?report=1 → 前回の実行レポートを表示するだけ（投稿しない）
   if (url.searchParams.get('report') === '1') {
     try {
-      const [morning, motion, jake] = await Promise.all([
+      const [morning, motion, jake, morningPosted] = await Promise.all([
         redis.get('last_morning_report'),
         redis.get('ig_motion_posted_date'),
         redis.get('ig_jake_posted_date'),
+        redis.get('morning_posted_date'),
       ]);
       const parsed = typeof morning === 'string' ? JSON.parse(morning) : morning;
       return new Response(JSON.stringify({
         lastMorningReport: parsed,
+        morningPostedDate: morningPosted || '(記録なし)',
         instagramLastPosted: {
           'motion.imaging': motion || '(記録なし)',
           'jake_images_':   jake   || '(記録なし)',
@@ -651,6 +657,9 @@ export async function GET(request) {
 
   const skipList = (url.searchParams.get('skip') || '').split(',').filter(Boolean);
   const dryRun   = url.searchParams.get('dry') === '1';
+  const force    = url.searchParams.get('force') === '1';
+  const jstToday = new Date(Date.now() + 9 * 3600000);
+  const todayStr = `${jstToday.getFullYear()}/${String(jstToday.getMonth() + 1).padStart(2, '0')}/${String(jstToday.getDate()).padStart(2, '0')}`;
 
   const t0 = Date.now();
   const report = {
@@ -661,8 +670,27 @@ export async function GET(request) {
     dryRun,
     startedAt: new Date().toISOString(),
   };
+  let claimedToday = false;
 
   try {
+    // ★ 当日重複防止（2026-09-14 追加）
+    //   post-dailyで雲海指数が2回投稿された事故（check-then-act構造の
+    //   race condition）と同型の事故を防ぐため、他の2ファイルと同じく
+    //   投稿処理前にredis SET NXで原子的に「今日の枠」を予約する。
+    //   旧実装はこのファイルに当日重複チェック自体が存在せず、Xの同一
+    //   文面判定だけに頼っていたが、天気で文面が毎回変わるため
+    //   cronの二重起動を防げていなかった。
+    if (!dryRun && !force) {
+      const claimed = await redis.set('morning_posted_date', todayStr, { nx: true, ex: 82800 });
+      if (claimed === null) {
+        report.result = '本日投稿済み、または同時実行のためスキップ';
+        report.finishedAt = new Date().toISOString();
+        report.totalMs = Date.now() - t0;
+        return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+      }
+      claimedToday = true;
+    }
+
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
     const sakura      = isSakuraSeason();
@@ -761,6 +789,12 @@ export async function GET(request) {
       if (idx < entries.length - 1) await new Promise(r2 => setTimeout(r2, 5000));
     }
 
+    // !forceの場合は冒頭のSET NXで既に予約済み。forceはNX予約をスキップしているので、
+    // 同日中の通常cronによる再投稿を防ぐため、ここで（上書きで）フラグを立てる。
+    if (force) {
+      try { await redis.set('morning_posted_date', todayStr, { ex: 82800 }); } catch {}
+    }
+
     report.finishedAt = new Date().toISOString();
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
@@ -771,6 +805,9 @@ export async function GET(request) {
   } catch (error) {
     report.fatalError = error.message;
     report.totalMs = Date.now() - t0;
+    // 投稿完了前に致命的エラーで落ちた場合、予約したフラグを解放し
+    // 当日中の再実行をブロックしたままにしない
+    if (claimedToday) { try { await redis.del('morning_posted_date'); } catch {} }
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), {
       status: 500, headers: jsonHeaders,
