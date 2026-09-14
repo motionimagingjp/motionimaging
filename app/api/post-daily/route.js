@@ -417,8 +417,28 @@ export async function GET(request) {
 
   const t0 = Date.now();
   const report = { x: {}, threads: {}, startedAt: new Date().toISOString() };
+  let claimedToday = false;
 
   try {
+    // ★ 重複投稿バグの修正（2026-09-14）
+    //   旧実装は「redis.getで確認→投稿→最後にredis.setでフラグを立てる」
+    //   という check-then-act 構造で、確認とフラグ確定の間に
+    //   Gemini生成・画像アップロード・2件の投稿・Threads投稿と
+    //   数十秒かかっていた。この間にcronが二重に起動すると、両方とも
+    //   「未投稿」と判定して雲海指数が2回投稿される事故が発生していた
+    //   （9/13夜、内容の異なる雲海指数が2本投稿された）。
+    //   → dry run以外は投稿処理を始める前に SET NX で原子的に
+    //     「今日の枠」を予約し、二重起動があっても片方は即座に
+    //     スキップされるようにする（dry runは投稿しないので対象外）。
+    if (!dryRun && !force) {
+      const claimed = await redis.set('daily_posted_date', todayStr, { nx: true, ex: 82800 });
+      if (claimed === null) {
+        report.result = '本日投稿済み、または同時実行のためスキップ';
+        return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+      }
+      claimedToday = true;
+    }
+
     const API_KEY   = process.env.GEMINI_API_KEY;
     const dateLabel = getTomorrowLabel();
     const { weather, penalty, min } = await getNightWeather();
@@ -444,14 +464,6 @@ export async function GET(request) {
           fujisan:   { weighted: weightedLength(fujisanTweet),  text: fujisanTweet,  diag: fujiDiag },
         },
       }, null, 2), { status: 200, headers: jsonHeaders });
-    }
-
-    if (!force) {
-      const lastPosted = await redis.get('daily_posted_date');
-      if (lastPosted === todayStr) {
-        report.result = '本日投稿済みのためスキップ';
-        return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
-      }
     }
 
     const xClient = new TwitterApi({
@@ -507,7 +519,11 @@ export async function GET(request) {
       if (idx < entries.length - 1) await new Promise(r2 => setTimeout(r2, 10000));
     }
 
-    await redis.set('daily_posted_date', todayStr, { ex: 82800 });
+    // !forceの場合は冒頭のSET NXで既に予約済み。forceはNX予約をスキップしているので、
+    // 同日中の通常cronによる再投稿を防ぐため、ここで（上書きで）フラグを立てる。
+    if (force) {
+      try { await redis.set('daily_posted_date', todayStr, { ex: 82800 }); } catch {}
+    }
 
     report.finishedAt = new Date().toISOString();
     report.totalMs = Date.now() - t0;
@@ -518,6 +534,9 @@ export async function GET(request) {
   } catch (error) {
     report.fatalError = error.message;
     report.totalMs = Date.now() - t0;
+    // 投稿完了前に致命的エラーで落ちた場合、予約したフラグを解放し
+    // 当日中の再実行をブロックしたままにしない
+    if (claimedToday) { try { await redis.del('daily_posted_date'); } catch {} }
     try { await redis.set('last_daily_report', JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }

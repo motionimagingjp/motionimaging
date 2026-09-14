@@ -323,8 +323,26 @@ export async function GET(request) {
   const t0 = Date.now();
   const diag = {};
   const report = { startedAt: new Date().toISOString() };
+  let claimedToday = false;
 
   try {
+    // ★ 重複投稿バグの修正（2026-09-14、post-dailyと同型の事故を予防）
+    //   旧実装は「redis.getで確認→投稿→最後にredis.setでフラグを立てる」
+    //   check-then-act 構造で、確認とフラグ確定の間にGemini生成・画像
+    //   アップロード・X投稿・Threads投稿の時間差があった。この間にcronが
+    //   二重に起動すると両方とも「未投稿」と判定してしまう（post-dailyで
+    //   雲海指数が2回投稿される実害が発生済み）。
+    //   → dry run以外は投稿処理を始める前に SET NX で原子的に
+    //     「今日の枠」を予約する。
+    if (!dryRun && !force) {
+      const claimed = await redis.set(todayKey, today, { nx: true, ex: 82800 });
+      if (claimed === null) {
+        report.result = '本日投稿済み、または同時実行のためスキップ';
+        return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
+      }
+      claimedToday = true;
+    }
+
     const dateLabel = getTodayLabel();
     const moon = getMoonInfo(getMoonAge());
     const tweet = await buildStarTweet(process.env.GEMINI_API_KEY, dateLabel, moon, diag);
@@ -337,14 +355,6 @@ export async function GET(request) {
         message: 'Dry run（投稿していません）',
         tweet, weighted: weightedLength(tweet), moon, source: diag.source,
       }, null, 2), { status: 200, headers: jsonHeaders });
-    }
-
-    if (!force) {
-      const lastPosted = await redis.get(todayKey);
-      if (lastPosted === today) {
-        report.result = '本日投稿済みのためスキップ';
-        return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
-      }
     }
 
     const xClient = new TwitterApi({
@@ -396,6 +406,9 @@ export async function GET(request) {
   } catch (error) {
     report.fatalError = error.message;
     report.totalMs = Date.now() - t0;
+    // 投稿完了前に致命的エラーで落ちた場合、予約したフラグを解放し
+    // 当日中の再実行をブロックしたままにしない
+    if (claimedToday) { try { await redis.del(todayKey); } catch {} }
     try { await redis.set('last_evening_report', JSON.stringify(report)); } catch {}
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
