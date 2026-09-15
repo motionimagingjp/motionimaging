@@ -14,7 +14,12 @@
 //     Geminiの丸写し（花畑指数と同型の事故）を防止。
 //  4. weightedLength()によるX文字数チェックを追加（未実装だった）。
 //  5. リトライ・重複403ハンドリング、?key=/?dry=1/?force=1/?report=1、
-//     富士山指数への画像添付（雲海用の写真は未整備のため対象外）を追加。
+//     富士山指数への画像添付を追加。
+//
+// 2026-09-15 追加：雲海指数にも画像添付を追加。取り急ぎ4枚
+//   （app/api/post-images/cloud/雲海001.jpg〜雲海004.jpg）を用意。
+//   富士山は5桁連番だが雲海は3桁連番のため、IMAGE_CATEGORIESに
+//   カテゴリごとのpad桁数を持たせて両対応にした。
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
@@ -279,11 +284,15 @@ async function buildFujisanTweet(apiKey, dateLabel, weather, penalty, min, diag)
 }
 
 // ============================================================
-// 画像：富士山カテゴリのローテーション添付（雲海用の写真は未整備）
+// 画像：富士山・雲海カテゴリのローテーション添付
 // ============================================================
-// ファイル名は「接頭辞（漢字）+ 5桁連番」の実物に合わせる: 富士00101.jpg〜
+// ファイル名は「接頭辞（漢字）+ ゼロ埋め連番」の実物に合わせる。
+// 富士山は既存の5桁（富士山00101.jpg〜）、雲海は3桁（雲海001.jpg〜、
+// 2026-09-15追加・取り急ぎ4枚）とpad桁数が異なるため、カテゴリごとに
+// padを持たせる（未指定時は5桁のまま）。
 const IMAGE_CATEGORIES = {
-  fuji: { count: parseInt(process.env.FUJI_IMAGE_COUNT || '11'), startNum: 101, prefix: '富士山' },
+  fuji:  { count: parseInt(process.env.FUJI_IMAGE_COUNT  || '11'), startNum: 101, prefix: '富士山', pad: 5 },
+  cloud: { count: parseInt(process.env.CLOUD_IMAGE_COUNT || '4'),  startNum: 1,   prefix: '雲海',   pad: 3 },
 };
 
 function buildPhotoUrl(category, index) {
@@ -291,7 +300,7 @@ function buildPhotoUrl(category, index) {
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
-  const num    = String(cat.startNum + index).padStart(5, '0');
+  const num    = String(cat.startNum + index).padStart(cat.pad || 5, '0');
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
 }
 
@@ -473,8 +482,8 @@ export async function GET(request) {
       accessSecret: process.env.X_ACCESS_SECRET,
     });
 
-    // 富士山指数にのみ画像を添付（雲海用の写真は未整備）
-    const IMAGE_MAP = { fujisan: 'fuji' };
+    // 富士山指数・雲海指数それぞれに対応カテゴリの画像を添付
+    const IMAGE_MAP = { fujisan: 'fuji', cloud_sea: 'cloud' };
 
     const entries = [
       ['cloud_sea', cloudSeaTweet],
@@ -493,7 +502,7 @@ export async function GET(request) {
         mediaId = up.mediaId;
         photoMeta = { category, index: next, photoKey, uploaded: !!mediaId };
         const catInfo = IMAGE_CATEGORIES[category];
-        const shownName = `${catInfo.prefix}${String(catInfo.startNum + next).padStart(5, '0')}.jpg`;
+        const shownName = `${catInfo.prefix}${String(catInfo.startNum + next).padStart(catInfo.pad || 5, '0')}.jpg`;
         report[`${key}_image`] = mediaId
           ? `添付成功 (${category}/${shownName}, ${up.sizeMB}MB)`
           : `添付失敗: ${up.error} (${category}/${shownName})`;
