@@ -292,7 +292,7 @@ async function buildFujisanTweet(apiKey, dateLabel, weather, penalty, min, diag)
 // padを持たせる（未指定時は5桁のまま）。
 const IMAGE_CATEGORIES = {
   fuji:  { count: parseInt(process.env.FUJI_IMAGE_COUNT  || '11'), startNum: 101, prefix: '富士山', pad: 5 },
-  cloud: { count: parseInt(process.env.CLOUD_IMAGE_COUNT || '3'),  startNum: 1,   prefix: '雲海',   pad: 3 },
+  cloud: { count: parseInt(process.env.CLOUD_IMAGE_COUNT || '4'),  startNum: 1,   prefix: '雲海',   pad: 3 },
 };
 
 function buildPhotoUrl(category, index) {
