@@ -3,14 +3,21 @@
 // ============================================================
 // 2026-09-12 修正版
 //  1. weightedLength()によるX文字数チェック未実装 → 追加（花畑指数と同じ地雷の予防）
-//  2. プロンプト例示に具体的な数値(75,70,65,60,55)があり、Geminiが
-//     そのままコピーして返す事故のリスク → 数値を消してスキーマのみ提示、
-//     looksLikeEchoedExample()で丸写しを検出
-//  3. スコアを整数に強制clamp（10〜100）。Geminiが返した生の値には
-//     下限処理が一切かかっていなかった
-//  4. リトライ・重複403のハンドリングを追加
-//  5. ?key= / ?dry=1 / ?force=1 / ?report=1 の標準デバッグインターフェース追加
-//  6. 星カテゴリの写真をローテーション添付（Upstash Redis管理）
+//  2. スコアを整数に強制clamp（10〜100）
+//  3. リトライ・重複403のハンドリングを追加
+//  4. ?key= / ?dry=1 / ?force=1 / ?report=1 の標準デバッグインターフェース追加
+//  5. 星カテゴリの写真をローテーション添付（Upstash Redis管理）
+//
+// 2026-09-16 修正版
+//  ★ 天気を指数に反映（最重要）
+//    旧実装は天気を一切取得せず、月齢だけをGeminiに渡してスコアを
+//    "想像"させていた。そのため全国的に雨だった9/16でも「秩父95%」
+//    のような現実と真逆の指数が投稿されていた。
+//    花畑指数・雲海指数は天気を取得して補正していたのに、星空指数だけ
+//    この処理が丸ごと欠けていたのが原因。
+//    → open-meteoで5スポットそれぞれの今夜19時〜翌3時の雲量・天気コードを
+//      取得し、コード側で決定的にスコアを算出する方式へ変更。
+//      Geminiにはメモ文のみを書かせ、スコアとの矛盾はコードで検出・上書きする。
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
@@ -81,27 +88,137 @@ function getMoonInfo(age) {
   return           { age, label: '晦日月', effect: '新月に向け星空回復中、指数+5%補正' };
 }
 
-// 安全なJSON抽出
-function safeParseJson(raw) {
+// ============================================================
+// スポット定義と夜間の空模様の取得（2026-09-16 追加）
+//
+//  旧実装は天気を一切取得せず、月齢だけでGeminiにスコアを算出させて
+//  いた。そのため全国的に雨の日でも「秩父95%」のような現実と真逆の
+//  指数が出ていた（花畑指数・雲海指数は天気を取得して補正していたのに、
+//  星空指数だけこの処理が欠けていた）。
+//
+//  open-meteoは複数地点をカンマ区切りで1リクエストにまとめられるため、
+//  5スポットそれぞれの「今夜19時〜翌3時」の雲量と天気コードを取得し、
+//  コード側で決定的にスコアを算出する（Geminiにスコアを任せない）。
+// ============================================================
+const SPOTS = [
+  { name: '河口湖（山梨）', lat: 35.5171, lon: 138.7519 },
+  { name: '爪木崎（静岡）', lat: 34.6726, lon: 138.9536 },
+  { name: '大洗（茨城）',   lat: 36.3133, lon: 140.5750 },
+  { name: '三浦（神奈川）', lat: 35.1439, lon: 139.6178 },
+  { name: '秩父（埼玉）',   lat: 35.9915, lon: 139.0856 },
+];
+
+function weatherCodeToText(code) {
+  if (code >= 95) return '雷雨';
+  if (code >= 85) return 'にわか雪';
+  if (code >= 80) return 'にわか雨';
+  if (code >= 71) return '雪';
+  if (code >= 61) return '雨';
+  if (code >= 51) return '霧雨';
+  if (code >= 45) return '霧';
+  if (code === 3) return '曇り';
+  if (code === 2) return '一部曇り';
+  if (code === 1) return '晴れ';
+  return '快晴';
+}
+
+// 天気コードごとの指数上限。雨・雪・霧の夜は雲量に関わらず星は見えない。
+function weatherCap(code) {
+  if (code >= 95) return 10;  // 雷雨
+  if (code >= 85) return 15;  // にわか雪
+  if (code >= 80) return 20;  // にわか雨
+  if (code >= 71) return 15;  // 雪
+  if (code >= 61) return 15;  // 雨
+  if (code >= 51) return 25;  // 霧雨
+  if (code >= 45) return 20;  // 霧
+  if (code === 3) return 35;  // 曇り
+  if (code === 2) return 65;  // 一部曇り
+  if (code === 1) return 90;  // 晴れ
+  return 100;                 // 快晴
+}
+
+// 月齢による補正（getMoonInfoの説明文と数値を一致させる）
+function moonAdjustment(age) {
+  if (age <= 3)  return 10;
+  if (age <= 7)  return 0;
+  if (age <= 12) return -10;
+  if (age <= 17) return -20;
+  if (age <= 22) return -5;
+  return 5;
+}
+
+// 今夜19時〜翌3時に該当する時刻インデックスを抜き出す
+function pickNightIndices(times) {
+  const jst = new Date(Date.now() + 9 * 3600000);
+  const fmt = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  const today    = fmt(jst);
+  const tomorrow = fmt(new Date(jst.getTime() + 24 * 3600000));
+  const idx = [];
+  times.forEach((t, i) => {
+    const [datePart, timePart] = String(t).split('T');
+    const hour = parseInt(String(timePart).slice(0, 2), 10);
+    if (datePart === today && hour >= 19) idx.push(i);
+    else if (datePart === tomorrow && hour <= 3) idx.push(i);
+  });
+  return idx;
+}
+
+// 5スポット分の夜間の空模様を1リクエストで取得する。
+// 失敗した場合はnullを返し、呼び出し元は月齢のみの算出にフォールバックする。
+async function getNightSkyConditions() {
   try {
-    const clean = raw.replace(/```json|```/g, '').trim();
-    const match = clean.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    return JSON.parse(match[0]);
+    const lats = SPOTS.map(s => s.lat).join(',');
+    const lons = SPOTS.map(s => s.lon).join(',');
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}`
+      + '&hourly=weathercode,cloudcover&timezone=Asia%2FTokyo&forecast_days=2';
+    const res = await fetch(url);
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : [data];
+    if (list.length < SPOTS.length) return null;
+
+    return SPOTS.map((spot, i) => {
+      const h = list[i] && list[i].hourly;
+      if (!h || !Array.isArray(h.time)) return null;
+      const idx = pickNightIndices(h.time);
+      if (idx.length === 0) return null;
+      const codes  = idx.map(j => Number(h.weathercode[j])).filter(n => Number.isFinite(n));
+      const clouds = idx.map(j => Number(h.cloudcover[j])).filter(n => Number.isFinite(n));
+      if (codes.length === 0 || clouds.length === 0) return null;
+      return {
+        worstCode: Math.max(...codes),
+        avgCloud:  clouds.reduce((a, b) => a + b, 0) / clouds.length,
+      };
+    });
   } catch {
     return null;
   }
 }
 
-// 例示の丸写し検出（花畑指数の事故と同型の対策）
-function looksLikeEchoedExample(scores) {
-  if (!Array.isArray(scores) || scores.length === 0) return true;
-  const banned = [75, 70, 65, 60, 55]; // 旧プロンプトの例示値
-  let hit = 0;
-  for (let i = 0; i < scores.length && i < banned.length; i++) {
-    if (Number(scores[i]) === banned[i]) hit++;
-  }
-  return hit >= 4;
+// 雲量と天気コードから星空指数を決定的に算出する
+function scoreFromSky(sky, moonAdj) {
+  // 雲量ベース：快晴(0%)=100、曇天(100%)=10
+  const cloudScore = 100 - sky.avgCloud * 0.9;
+  const score = Math.min(cloudScore, weatherCap(sky.worstCode)) + moonAdj;
+  return Math.max(10, Math.min(100, Math.round(score)));
+}
+
+// スコアとメモの語感が矛盾していないか検査する（雲海指数と同型の安全弁）。
+// 「雨なのに絶好の観測日和」のような矛盾をコード側で弾く。
+const NEGATIVE_PHRASES = ['難しい', '困難', '期待薄', '厳しい', '見込みは低', '観測できません', '望めない', '見られない', '不向き'];
+const POSITIVE_PHRASES = ['絶好', 'チャンス', 'おすすめ', '好条件', '狙い目', '期待できます', '期待大'];
+
+function memoContradictsScore(bestScore, memo) {
+  const hasNegative = NEGATIVE_PHRASES.some(p => memo.includes(p));
+  const hasPositive = POSITIVE_PHRASES.some(p => memo.includes(p));
+  if (bestScore >= 60 && hasNegative && !hasPositive) return true;
+  if (bestScore < 35 && hasPositive && !hasNegative) return true;
+  return false;
+}
+
+function buildFallbackMemo(bestScore, moon, worstText) {
+  if (bestScore >= 70) return `${moon.label}で好条件。${worstText}の崩れに注意しつつ狙い目。`;
+  if (bestScore >= 45) return `${worstText}まじりで条件は半々。雲の切れ間次第。`;
+  return `${worstText}のため今夜の星空観測は厳しい見通しです。`;
 }
 
 // ============================================================
@@ -128,39 +245,55 @@ async function callGemini(apiKey, prompt) {
 // 星空ツイート本文の組み立て（スコア整数clamp・文字数保証つき）
 // ============================================================
 async function buildStarTweet(apiKey, dateLabel, moon, diag) {
-  const spots = ['河口湖（山梨）', '爪木崎（静岡）', '大洗（茨城）', '三浦（神奈川）', '秩父（埼玉）'];
+  const moonAdj = moonAdjustment(moon.age);
+  const sky = await getNightSkyConditions();
 
-  const prompt = '月齢' + moon.age + '日（' + moon.label + '）の夜の星空指数を5スポット分算出してください。\n'
-    + '月齢補正：' + moon.effect + '\n'
-    + 'スポット：' + spots.join('、') + '\n'
-    + '【重要】スコアは月齢補正と季節から必ず自分で計算すること。例示の数値をそのまま使わないこと。\n'
-    + 'スコアは整数（10〜100）。memoは30文字以内でスコアの傾向と矛盾しない内容にすること。\n\n'
-    + '次のスキーマのJSONのみで返答（マークダウン不要）：\n'
-    + '{"scores":[<整数>,<整数>,<整数>,<整数>,<整数>],"memo":"<条件コメント>"}';
-
-  let parsed = null;
-  try {
-    const raw = await callGemini(apiKey, prompt);
-    parsed = safeParseJson(raw);
-  } catch { parsed = null; }
-
-  let scores, memo;
-  if (parsed && Array.isArray(parsed.scores) && parsed.scores.length === spots.length && !looksLikeEchoedExample(parsed.scores)) {
-    scores = parsed.scores;
-    memo = parsed.memo || (moon.label + 'の夜、条件を確認してください。');
-    diag.source = 'Gemini';
+  // ★ スコアはコード側で決定的に算出する（Geminiには任せない）。
+  //   旧実装はGeminiに月齢だけ渡してスコアを"想像"させていたため、
+  //   雨の日でも高い指数が出ていた。
+  let scores, weatherNote, worstText;
+  if (sky && sky.every(Boolean)) {
+    scores = sky.map(s => scoreFromSky(s, moonAdj));
+    weatherNote = SPOTS.map((s, i) =>
+      `${s.name}:${weatherCodeToText(sky[i].worstCode)}(雲量${Math.round(sky[i].avgCloud)}%)`
+    ).join('、');
+    // 最も条件の良いスポットの天気をメモの基準にする
+    const bestIdx = scores.indexOf(Math.max(...scores));
+    worstText = weatherCodeToText(sky[bestIdx].worstCode);
+    diag.source = '天気連動（open-meteo）';
+    diag.weather = weatherNote;
   } else {
+    // 天気取得に失敗した場合のみ月齢ベースにフォールバック
     const base = moon.age <= 7 ? 80 : moon.age <= 17 ? 55 : 70;
-    scores = [base, base - 5, base - 10, base - 15, base - 20];
-    memo = moon.label + 'の夜、条件を確認してください。';
-    diag.source = parsed ? 'echo検出→フォールバック' : 'フォールバック（Gemini失敗）';
+    scores = [base, base - 5, base - 10, base - 15, base - 20]
+      .map(s => Math.max(10, Math.min(100, s + moonAdj)));
+    weatherNote = '取得失敗';
+    worstText = '天候不明';
+    diag.source = 'フォールバック（天気取得失敗・月齢のみ）';
   }
 
-  // 整数・範囲clampを必ず適用（フォールバックだけでなくGemini値にも）
-  scores = scores.map(s => Math.max(10, Math.min(100, Math.round(Number(s) || 10))));
+  const bestScore = Math.max(...scores);
 
-  const ranked = spots
-    .map((name, i) => ({ name, score: scores[i] }))
+  // メモだけGeminiに書かせる（実際のスコアと天気を渡して矛盾を防ぐ）
+  let memo = null;
+  try {
+    const prompt = '星空観測の今夜のコンディションを一言でまとめてください。\n'
+      + '月齢：' + moon.age + '日（' + moon.label + '）\n'
+      + '各スポットの今夜の天気：' + weatherNote + '\n'
+      + '算出済みの星空指数：' + SPOTS.map((s, i) => `${s.name}=${scores[i]}%`).join('、') + '\n'
+      + '【重要】上記の指数と天気に矛盾しない内容にすること。雨や曇りなら無理に前向きな表現をしないこと。\n'
+      + '30文字以内の日本語1文のみを出力（JSONやマークダウン不要）。';
+    const raw = await callGemini(apiKey, prompt);
+    if (raw) memo = raw.replace(/\n/g, '').replace(/^["'`]|["'`]$/g, '').trim();
+  } catch { memo = null; }
+
+  if (!memo || memoContradictsScore(bestScore, memo)) {
+    if (memo) diag.memoOverridden = `矛盾検出のため上書き: "${memo}"`;
+    memo = buildFallbackMemo(bestScore, moon, worstText);
+  }
+
+  const ranked = SPOTS
+    .map((s, i) => ({ name: s.name, score: scores[i] }))
     .sort((a, b) => b.score - a.score);
 
   const build = (nameW, memoW) => {
@@ -348,12 +481,17 @@ export async function GET(request) {
     const tweet = await buildStarTweet(process.env.GEMINI_API_KEY, dateLabel, moon, diag);
     report.moonAge = moon;
     report.source = diag.source;
+    report.weather = diag.weather || '(なし)';
+    if (diag.memoOverridden) report.memoOverridden = diag.memoOverridden;
     report.weighted = weightedLength(tweet);
 
     if (dryRun) {
       return new Response(JSON.stringify({
         message: 'Dry run（投稿していません）',
-        tweet, weighted: weightedLength(tweet), moon, source: diag.source,
+        tweet, weighted: weightedLength(tweet), moon,
+        source: diag.source,
+        weather: diag.weather || '(なし)',
+        memoOverridden: diag.memoOverridden || null,
       }, null, 2), { status: 200, headers: jsonHeaders });
     }
 
