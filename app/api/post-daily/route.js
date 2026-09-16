@@ -286,13 +286,15 @@ async function buildFujisanTweet(apiKey, dateLabel, weather, penalty, min, diag)
 // ============================================================
 // 画像：富士山・雲海カテゴリのローテーション添付
 // ============================================================
-// ファイル名は「接頭辞（漢字）+ ゼロ埋め連番」の実物に合わせる。
-// 富士山は既存の5桁（富士山00101.jpg〜）、雲海は3桁（雲海001.jpg〜、
-// 2026-09-15追加・取り急ぎ4枚）とpad桁数が異なるため、カテゴリごとに
-// padを持たせる（未指定時は5桁のまま）。
+// ファイル名は「接頭辞（漢字）+ ゼロ埋め連番 + 拡張子」の実物に合わせる。
+// 富士山は5桁・小文字.jpg（富士山00101.jpg〜）、雲海は4桁・大文字.JPG
+// （雲海0001.JPG〜、2026-09-16に11枚へ拡充）とpad桁数・拡張子の大小が
+// 異なるため、カテゴリごとにpad/extを持たせる（未指定時はpad5・.jpg）。
+// GitHubのraw URLは大文字小文字を区別するため、実ファイル名と拡張子の
+// 大小を必ず一致させること（ls等で実物を確認してから変更する）。
 const IMAGE_CATEGORIES = {
-  fuji:  { count: parseInt(process.env.FUJI_IMAGE_COUNT  || '11'), startNum: 101, prefix: '富士山', pad: 5 },
-  cloud: { count: parseInt(process.env.CLOUD_IMAGE_COUNT || '4'),  startNum: 1,   prefix: '雲海',   pad: 3 },
+  fuji:  { count: parseInt(process.env.FUJI_IMAGE_COUNT  || '11'), startNum: 101, prefix: '富士山', pad: 5, ext: '.jpg' },
+  cloud: { count: parseInt(process.env.CLOUD_IMAGE_COUNT || '11'), startNum: 1, prefix: '雲海',   pad: 4, ext: '.JPG' },
 };
 
 function buildPhotoUrl(category, index) {
@@ -301,7 +303,7 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(cat.pad || 5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}${cat.ext || '.jpg'}`;
 }
 
 async function getNextPhotoIndex(category) {
@@ -502,7 +504,7 @@ export async function GET(request) {
         mediaId = up.mediaId;
         photoMeta = { category, index: next, photoKey, uploaded: !!mediaId };
         const catInfo = IMAGE_CATEGORIES[category];
-        const shownName = `${catInfo.prefix}${String(catInfo.startNum + next).padStart(catInfo.pad || 5, '0')}.jpg`;
+        const shownName = `${catInfo.prefix}${String(catInfo.startNum + next).padStart(catInfo.pad || 5, '0')}${catInfo.ext || '.jpg'}`;
         report[`${key}_image`] = mediaId
           ? `添付成功 (${category}/${shownName}, ${up.sizeMB}MB)`
           : `添付失敗: ${up.error} (${category}/${shownName})`;
