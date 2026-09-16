@@ -282,7 +282,8 @@ async function buildStarTweet(apiKey, dateLabel, moon, diag) {
       + '各スポットの今夜の天気：' + weatherNote + '\n'
       + '算出済みの星空指数：' + SPOTS.map((s, i) => `${s.name}=${scores[i]}%`).join('、') + '\n'
       + '【重要】上記の指数と天気に矛盾しない内容にすること。雨や曇りなら無理に前向きな表現をしないこと。\n'
-      + '30文字以内の日本語1文のみを出力（JSONやマークダウン不要）。';
+      + '28文字以内の日本語1文のみを出力（JSONやマークダウン不要）。'
+      + '「絶望」のような過度に悲観的な表現は避け、事実を淡々と伝えること。';
     const raw = await callGemini(apiKey, prompt);
     if (raw) memo = raw.replace(/\n/g, '').replace(/^["'`]|["'`]$/g, '').trim();
   } catch { memo = null; }
@@ -304,7 +305,11 @@ async function buildStarTweet(apiKey, dateLabel, moon, diag) {
     return t;
   };
 
-  const plans = [[30, 40], [26, 30], [22, 20], [22, 0], [18, 0]];
+  // memoWは「重み付き」の上限なので、日本語N文字を収めるには 2N 必要。
+  // 旧設定は先頭プランがmemoW=40（日本語20文字）しかなく、30文字程度の
+  // メモが毎回「…」で途中切れしていた（実際のツイートは221/272で
+  // 50文字分以上余っていた）。実測に合わせて先頭プランを広げる。
+  const plans = [[30, 64], [30, 48], [26, 36], [22, 20], [22, 0], [18, 0]];
   for (const [nameW, memoW] of plans) {
     const t = build(nameW, memoW);
     if (weightedLength(t) <= X_TARGET) return t;
