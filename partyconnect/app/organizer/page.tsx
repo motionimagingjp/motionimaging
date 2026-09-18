@@ -39,7 +39,13 @@ export default function OrganizerHome() {
 
   const sendMagicLink = async () => {
     setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({ email });
+    // リダイレクト先を明示しないと Supabase の既定(Site URL = トップページ)に戻ってしまい、
+    // クライアント側の Supabase 初期化が走らないため、この画面のURLに access_token が
+    // 渡ってきてもセッションとして拾われない
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/organizer` },
+    });
     setMessage(error ? error.message : 'ログイン用のリンクをメールで送信しました');
     setBusy(false);
   };
