@@ -217,9 +217,14 @@ Deno.serve(async (req) => {
             });
           });
         };
-        // 男女で offset を揃えると全員が相互指名になり不自然なので、片側だけずらす
+        // ★同じ offset を使うことで male[i] <-> female[i] が必ず相互の第1希望になり、
+        //   相互指名限定(5-1)の下でも成立ペアが生まれる。offset をずらすと
+        //   男女の指名がすれ違い、相互指名が1組も生まれず「確定」しても
+        //   成立ペア0件になってしまう(実際に発生した不具合)。
+        //   2〜3希望は男女で向きを変えているので、一部は片側指名のまま残り
+        //   one_sided_pairs_count にも実データが入る。
         pushVotes(males, females, 0);
-        pushVotes(females, males, 1);
+        pushVotes(females, males, 0);
         const { error: voteError } = await db.from('votes').insert(votes);
         if (voteError) throw voteError;
 
