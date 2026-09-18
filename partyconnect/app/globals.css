@@ -1,0 +1,121 @@
+/* 会場は照明が暗い前提。高コントラストと大きなタップ領域を優先する */
+:root {
+  --bg: #0f1020;
+  --surface: #1a1c33;
+  --surface-2: #23263f;
+  --border: #343858;
+  --text: #f4f4fb;
+  --muted: #a4a8c8;
+  --male: #7c9cff;
+  --female: #ff8fab;
+  --accent: #ffd166;
+  --danger: #ff6b6b;
+  --ok: #4ade80;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+main { max-width: 720px; margin: 0 auto; padding: 16px 16px 96px; }
+
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 24px 0 10px; }
+p { line-height: 1.7; }
+.muted { color: var(--muted); font-size: 14px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+button, .btn {
+  font: inherit;
+  font-weight: 700;
+  border: none;
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  min-height: 56px;           /* 暗所でも押しやすい大きさを確保する */
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  width: 100%;
+}
+button.primary { background: var(--accent); color: #241a00; }
+button.danger { background: var(--danger); color: #2a0000; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.inline { width: auto; min-height: 44px; padding: 10px 16px; }
+
+input, select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: 14px;
+  min-height: 52px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+textarea { min-height: 120px; resize: vertical; }
+label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px; }
+
+.big-number {
+  text-align: center;
+  padding: 28px 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 2px solid var(--border);
+}
+.big-number .label { font-size: 18px; color: var(--muted); }
+.big-number .value { font-size: 76px; font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; }
+.big-number.male .value { color: var(--male); }
+.big-number.female .value { color: var(--female); }
+
+.tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tabs button { flex: 1; min-height: 48px; padding: 12px; }
+.tabs button[aria-pressed='true'] { background: var(--accent); color: #241a00; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+
+.person {
+  text-align: left;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  min-height: 96px;
+  width: 100%;
+}
+.person[aria-pressed='true'] { border-color: var(--accent); background: var(--surface-2); }
+.person .no { font-size: 26px; font-weight: 800; }
+.person.male .no { color: var(--male); }
+.person.female .no { color: var(--female); }
+.person .nick { font-size: 15px; font-weight: 700; }
+.person .free { font-size: 13px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+.star { color: var(--accent); font-weight: 800; font-size: 13px; }
+
+.countdown { font-size: 46px; font-weight: 800; text-align: center; letter-spacing: 0.02em; }
+
+.notice { border-left: 4px solid var(--accent); padding: 10px 14px; background: var(--surface-2); border-radius: 8px; }
+.error { border-left: 4px solid var(--danger); padding: 10px 14px; background: var(--surface-2); border-radius: 8px; }
+
+.sticky-actions {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+}
+.sticky-actions > div { max-width: 720px; margin: 0 auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
