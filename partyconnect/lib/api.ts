@@ -58,6 +58,8 @@ export interface CheckinResult {
   gender: 'male' | 'female';
   participantNumber: number;
   nickname: string | null;
+  // null = 全項目使用。イベントごとに主催者が使う項目だけを絞り込める
+  enabledProfileFields: string[] | null;
 }
 
 export const checkin = (body: {
@@ -65,14 +67,14 @@ export const checkin = (body: {
 }) => callFunction<CheckinResult>('checkin', body);
 
 export const saveProfile = (body: {
-  sessionToken: string; nickname: string; profileData: Record<string, string>; freeText: string;
+  sessionToken: string; nickname: string; profileData: Record<string, string | string[]>; freeText: string;
 }) => callFunction<{ ok: true }>('save_profile', body);
 
 export interface ParticipantCard {
   gender: 'male' | 'female';
   number: number;
   nickname: string | null;
-  profile: Record<string, string>;
+  profile: Record<string, string | string[]>;
   freeText: string | null;
   isSelf: boolean;
   likedMe: boolean;

@@ -15,6 +15,7 @@ interface Me {
   gender: 'male' | 'female';
   participantNumber: number;
   nickname: string | null;
+  enabledProfileFields: string[] | null;
 }
 
 const LIST_PHASES = ['browse', 'like_vote', 'like_reveal', 'final_vote', 'calculating', 'result'];
@@ -52,6 +53,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         gender: res.gender,
         participantNumber: res.participantNumber,
         nickname: res.nickname,
+        enabledProfileFields: res.enabledProfileFields,
       });
       setStep('number');
     } catch (e) {
@@ -182,6 +184,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         <ProfileForm
           sessionToken={sessionToken}
           initial={{ nickname: me.nickname }}
+          enabledFields={me.enabledProfileFields}
           onSaved={() => setStep('event')}
         />
       </main>

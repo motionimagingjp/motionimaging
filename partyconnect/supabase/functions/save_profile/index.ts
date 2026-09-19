@@ -21,8 +21,10 @@ interface Body {
 
 const ALLOWED_PROFILE_KEYS = [
   'age_group', 'residence', 'hometown', 'blood_type', 'height',
-  'occupation', 'holiday', 'marital_status',
+  'occupation', 'holiday', 'marital_status', 'income', 'smoking', 'drinking', 'marriage_intent',
 ];
+// 複数選択（チェック方式）の項目。値は string[] で受け取る
+const MULTI_PROFILE_KEYS = ['sns'];
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return preflight();
@@ -53,6 +55,13 @@ Deno.serve(async (req) => {
     for (const key of ALLOWED_PROFILE_KEYS) {
       const value = body.profileData?.[key];
       if (typeof value === 'string' && value !== '') profileData[key] = value;
+    }
+    for (const key of MULTI_PROFILE_KEYS) {
+      const value = body.profileData?.[key];
+      if (Array.isArray(value)) {
+        const cleaned = value.filter((v): v is string => typeof v === 'string' && v !== '');
+        if (cleaned.length > 0) profileData[key] = cleaned;
+      }
     }
 
     const keyStore = new PostgresEventKeyStore(db);

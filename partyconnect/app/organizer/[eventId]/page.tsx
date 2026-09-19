@@ -2,6 +2,7 @@
 import { use, useCallback, useEffect, useState } from 'react';
 import { finalizeEvent, organizerCall, purgeEvent, type Progress } from '../../../lib/api';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
+import { PROFILE_FIELDS } from '../../../lib/profile-options';
 
 const PHASES: { key: string; label: string }[] = [
   { key: 'checkin', label: '① 受付開始' },
@@ -31,6 +32,8 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const [isDemo, setIsDemo] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // undefined = 未取得。取得済みなら以後のポーリングで編集中の内容を上書きしない
+  const [profileFields, setProfileFields] = useState<string[] | null | undefined>(undefined);
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => setToken(data.session?.access_token ?? null));
@@ -39,12 +42,14 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const refresh = useCallback(async () => {
     if (!token) return;
     const [{ data: event }, { data: state }] = await Promise.all([
-      supabase.from('events').select('checkin_token, is_demo').eq('id', eventId).single(),
+      supabase.from('events').select('checkin_token, is_demo, profile_field_keys').eq('id', eventId).single(),
       supabase.from('event_states').select('phase').eq('event_id', eventId).single(),
     ]);
     if (event) {
-      setCheckinToken((event as { checkin_token: string }).checkin_token);
-      setIsDemo((event as { is_demo: boolean }).is_demo);
+      const e = event as { checkin_token: string; is_demo: boolean; profile_field_keys: string[] | null };
+      setCheckinToken(e.checkin_token);
+      setIsDemo(e.is_demo);
+      setProfileFields((prev) => (prev === undefined ? e.profile_field_keys : prev));
     }
     if (state) setPhase((state as { phase: string }).phase);
     try {
@@ -95,6 +100,18 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
     await organizerCall({
       action: 'withdraw', eventId, gender: row.gender, participantNumber: row.number, withdrawn,
     }, token);
+  });
+
+  // profileFields が null の間は「全項目有効」の意味。個別に外した時点で明示リストに切り替える
+  const activeFields = profileFields ?? PROFILE_FIELDS.map((f) => f.key);
+  const toggleField = (key: string) => run(async () => {
+    const next = activeFields.includes(key)
+      ? activeFields.filter((k) => k !== key) : [...activeFields, key];
+    const { error } = await supabase.rpc('set_event_profile_fields', {
+      p_event_id: eventId, p_field_keys: next,
+    });
+    if (error) throw error;
+    setProfileFields(next);
   });
 
   if (!token) return <main><p className="muted">ログインが必要です。</p></main>;
@@ -185,6 +202,25 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
               ダミー参加者20名を投入（デモ）
             </button>
           )}
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>プロフィール項目</h2>
+        <p className="muted">参加者に聞く項目を選べます（選択肢の中身は固定です）。</p>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {PROFILE_FIELDS.map((field) => (
+            <label key={field.key} style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--text)' }}>
+              <input
+                type="checkbox"
+                checked={activeFields.includes(field.key)}
+                disabled={busy}
+                onChange={() => toggleField(field.key)}
+                style={{ width: 22, height: 22, minHeight: 22 }}
+              />
+              {field.label}
+            </label>
+          ))}
         </div>
       </div>
 

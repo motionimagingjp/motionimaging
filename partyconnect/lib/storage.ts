@@ -30,7 +30,7 @@ export const saveSessionToken = (token: string) => write(SESSION_KEY, token);
 
 export interface ProfileDraft {
   nickname: string;
-  profileData: Record<string, string>;
+  profileData: Record<string, string | string[]>;
   freeText: string;
 }
 

@@ -9,14 +9,16 @@ import { loadProfileDraft, saveProfileDraft } from '../lib/storage';
  * 入力は都度 localStorage に残す。会場の電波が切れても消えないようにするため。
  */
 export default function ProfileForm({
-  sessionToken, initial, onSaved,
+  sessionToken, initial, enabledFields, onSaved,
 }: {
   sessionToken: string;
   initial: { nickname: string | null };
+  enabledFields: string[] | null;
   onSaved: () => void;
 }) {
+  const fields = enabledFields ? PROFILE_FIELDS.filter((f) => enabledFields.includes(f.key)) : PROFILE_FIELDS;
   const [nickname, setNickname] = useState(initial.nickname ?? '');
-  const [profileData, setProfileData] = useState<Record<string, string>>({});
+  const [profileData, setProfileData] = useState<Record<string, string | string[]>>({});
   const [freeText, setFreeText] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,28 +64,43 @@ export default function ProfileForm({
         onChange={(e) => setNickname(e.target.value)}
       />
 
-      {PROFILE_FIELDS.map((field) => (
-        <div key={field.key}>
-          <label>{field.label}</label>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }}>
-            {field.options.map((option) => (
-              <button
-                type="button"
-                key={option}
-                className="person"
-                style={{ minHeight: 52, textAlign: 'center' }}
-                aria-pressed={profileData[field.key] === option}
-                onClick={() => setProfileData((prev) => ({
-                  ...prev,
-                  [field.key]: prev[field.key] === option ? '' : option,
-                }))}
-              >
-                {labelOf(field.key, option)}
-              </button>
-            ))}
+      {fields.map((field) => {
+        const isMulti = field.type === 'multi';
+        const current = profileData[field.key];
+        const currentList = Array.isArray(current) ? current : [];
+        return (
+          <div key={field.key}>
+            <label>{field.label}</label>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }}>
+              {field.options.map((option) => {
+                const pressed = isMulti ? currentList.includes(option) : current === option;
+                return (
+                  <button
+                    type="button"
+                    key={option}
+                    className="person"
+                    style={{ minHeight: 52, textAlign: 'center' }}
+                    aria-pressed={pressed}
+                    onClick={() => setProfileData((prev) => {
+                      if (isMulti) {
+                        const list = Array.isArray(prev[field.key]) ? prev[field.key] as string[] : [];
+                        return {
+                          ...prev,
+                          [field.key]: list.includes(option)
+                            ? list.filter((v) => v !== option) : [...list, option],
+                        };
+                      }
+                      return { ...prev, [field.key]: prev[field.key] === option ? '' : option };
+                    })}
+                  >
+                    {labelOf(field.key, option)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       <label htmlFor="freeText">自由記述（休日の過ごし方、得意料理など）</label>
       <textarea

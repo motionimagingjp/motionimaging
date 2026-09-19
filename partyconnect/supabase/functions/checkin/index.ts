@@ -51,6 +51,10 @@ Deno.serve(async (req) => {
       event_id: string; gender: string; participant_number: number; nickname: string | null;
     };
 
+    const { data: event, error: eventError } = await db
+      .from('events').select('profile_field_keys').eq('id', p.event_id).single();
+    if (eventError) throw eventError;
+
     return json({
       sessionToken,
       // Realtime で phase を購読するために返す。event_states は元々 anon が読めるので秘匿情報ではない
@@ -58,6 +62,7 @@ Deno.serve(async (req) => {
       gender: p.gender,
       participantNumber: p.participant_number,
       nickname: p.nickname,
+      enabledProfileFields: (event as { profile_field_keys: string[] | null }).profile_field_keys,
     });
   } catch (error) {
     return toErrorResponse(error);
