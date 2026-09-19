@@ -311,6 +311,15 @@ Deno.serve(async (req) => {
         const { error: voteError } = await db.from('votes').insert(votes);
         if (voteError) throw voteError;
 
+        // ★デモは votes に直接INSERTしていて submit_vote を通らないため、
+        //   投票済みフラグもここで自分で立てる。忘れると進捗が「0/20 未投票」のまま
+        //   全員マッチする、という矛盾した画面になる（実際に発生した不具合）
+        const votedAt = new Date().toISOString();
+        const { error: flagError } = await db.from('participants')
+          .update({ like_voted_at: votedAt, final_voted_at: votedAt })
+          .eq('event_id', event.id);
+        if (flagError) throw flagError;
+
         return json({ seeded: 20, votes: votes.length });
       }
 
