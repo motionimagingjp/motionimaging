@@ -226,6 +226,14 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
                 <td>
                   {progress.likeVoted} / {progress.checkedIn} 名
                   {' '}{doneMark(progress.likeVoted, progress.checkedIn)}
+                  {/* ★フェーズが進んでも消えないようにする。人数だけでは誰が残っているか
+                      分からず、声かけできないまま次のフェーズに進んでしまっていた（実際の不具合） */}
+                  {progress.pendingLike.length > 0 && (
+                    <div className="muted" style={{ marginTop: 2 }}>
+                      未投票: {pendingLabel(progress.pendingLike).male && `男 ${pendingLabel(progress.pendingLike).male}`}
+                      {' '}{pendingLabel(progress.pendingLike).female && `女 ${pendingLabel(progress.pendingLike).female}`}
+                    </div>
+                  )}
                 </td>
               </tr>
               <tr>
@@ -233,6 +241,12 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
                 <td>
                   {progress.finalVoted} / {progress.checkedIn} 名
                   {' '}{doneMark(progress.finalVoted, progress.checkedIn)}
+                  {progress.pendingFinal.length > 0 && (
+                    <div className="muted" style={{ marginTop: 2 }}>
+                      未投票: {pendingLabel(progress.pendingFinal).male && `男 ${pendingLabel(progress.pendingFinal).male}`}
+                      {' '}{pendingLabel(progress.pendingFinal).female && `女 ${pendingLabel(progress.pendingFinal).female}`}
+                    </div>
+                  )}
                 </td>
               </tr>
               <tr><th>辞退</th><td>{progress.withdrawn} 名</td></tr>
@@ -258,14 +272,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
             </div>
           ))}
 
-          {phase === 'like_vote' && progress && progress.pendingLike.length > 0 && (() => {
-            const { male, female } = pendingLabel(progress.pendingLike);
-            return (
-              <p className="notice" style={{ margin: 0 }}>
-                未投票（好印象）: {male && `男 ${male}`} {female && `女 ${female}`}
-              </p>
-            );
-          })()}
+          {/* 未投票の一覧は上の「進捗」カードに常時表示するため、ここでは繰り返さない */}
 
           {phase === 'final_vote' && (
             <>
@@ -273,14 +280,6 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
               <p className="muted" style={{ margin: 0 }}>
                 時間が来ても自動では締め切りません。締め切るまで投票は受け付けます。
               </p>
-              {progress && progress.pendingFinal.length > 0 && (() => {
-                const { male, female } = pendingLabel(progress.pendingFinal);
-                return (
-                  <p className="notice" style={{ margin: 0 }}>
-                    未投票（最終希望）: {male && `男 ${male}`} {female && `女 ${female}`}
-                  </p>
-                );
-              })()}
               <button type="button" disabled={busy} onClick={() => kick('calculating')}>
                 投票を締め切って集計する
               </button>

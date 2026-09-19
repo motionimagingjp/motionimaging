@@ -53,23 +53,23 @@ Deno.serve(async (req) => {
 
     switch (body.action) {
       case 'progress': {
+        // ★「投票した」かどうかは votes テーブルの行の有無ではなく、この2カラムで判定する。
+        //   0人選択で送信すると votes には1行も入らないため、votesの有無だけで見ると
+        //   「0人で送信済み」と「まだ一度も送信していない」が区別できなくなる
+        //   （実際に発生した不具合：全員投票済みなのに1名だけ未投票と表示された）。
         const { data, error } = await db
           .from('participants')
-          .select('id, gender, status, participant_number, nickname')
+          .select('id, gender, status, participant_number, nickname, like_voted_at, final_voted_at')
           .eq('event_id', event.id);
         if (error) throw error;
 
-        const { data: voters, error: voteError } = await db
-          .from('votes').select('from_participant_id, vote_type').eq('event_id', event.id);
-        if (voteError) throw voteError;
-
         const active = data.filter((p) => p.status === 'active');
-        const likeVoters = new Set(voters.filter((v) => v.vote_type === 'like').map((v) => v.from_participant_id));
-        const finalVoters = new Set(voters.filter((v) => v.vote_type === 'final').map((v) => v.from_participant_id));
+        const likeVotedCount = active.filter((p) => p.like_voted_at !== null).length;
+        const finalVotedCount = active.filter((p) => p.final_voted_at !== null).length;
 
         // 会場で「男性N番さん、投票お願いします」と声かけできるよう、未投票の番号を返す
-        const pending = (voted: Set<string>) => active
-          .filter((p) => !voted.has(p.id) && p.participant_number !== null)
+        const pending = (votedAtKey: 'like_voted_at' | 'final_voted_at') => active
+          .filter((p) => p[votedAtKey] === null && p.participant_number !== null)
           .map((p) => ({ gender: p.gender as 'male' | 'female', number: p.participant_number as number }))
           .sort((a, b) => a.number - b.number);
 
@@ -80,10 +80,10 @@ Deno.serve(async (req) => {
           female: active.filter((p) => p.gender === 'female').length,
           withdrawn: data.filter((p) => p.status === 'withdrawn').length,
           profileCompleted: active.filter((p) => p.nickname !== null && p.nickname !== '').length,
-          likeVoted: likeVoters.size,
-          finalVoted: finalVoters.size,
-          pendingLike: pending(likeVoters),
-          pendingFinal: pending(finalVoters),
+          likeVoted: likeVotedCount,
+          finalVoted: finalVotedCount,
+          pendingLike: pending('like_voted_at'),
+          pendingFinal: pending('final_voted_at'),
         });
       }
 

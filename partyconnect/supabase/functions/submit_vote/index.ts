@@ -73,6 +73,15 @@ Deno.serve(async (req) => {
       if (insertError) throw insertError;
     }
 
+    // ★0人で送信した場合 votes には1行も入らない。「送信済み」の事実は別カラムで記録する。
+    //   ここが無いと「0人で送信済み」と「まだ一度も送信していない」が区別できず、
+    //   主催者の進捗表示が永遠に未投票のままになる（実際に発生した不具合）。
+    const votedAtColumn = body.voteType === 'like' ? 'like_voted_at' : 'final_voted_at';
+    const { error: markError } = await db.from('participants')
+      .update({ [votedAtColumn]: new Date().toISOString() })
+      .eq('id', session.id);
+    if (markError) throw markError;
+
     // 投票内容そのものは返さない
     return json({ ok: true, submittedCount: numbers.length });
   } catch (error) {
