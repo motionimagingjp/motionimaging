@@ -89,6 +89,20 @@ label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px
 .tabs button { flex: 1; min-height: 48px; padding: 12px; }
 .tabs button[aria-pressed='true'] { background: var(--accent); color: var(--on-accent); }
 
+/* 自分の番号バッジ。一覧・投票画面のどこにいても自分が何番かを見失わないようにする */
+.my-number {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1.5px solid currentColor;
+  white-space: nowrap;
+}
+.my-number.male { color: var(--male); }
+.my-number.female { color: var(--female); }
+
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 
 .person {

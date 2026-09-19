@@ -272,13 +272,17 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
 
   return (
     <main>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <h1>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <h1 style={{ margin: 0 }}>
           {phase === 'like_vote' ? '気になる方を選ぶ'
             : phase === 'final_vote' ? '第1〜第3希望を選ぶ'
               : phase === 'like_reveal' ? '好印象のお知らせ' : '参加者一覧'}
         </h1>
-        <span className="muted">あなた: No.{me.participantNumber}</span>
+        {/* 自分の番号は必ず見える位置に出す。タイトルが長いと右端に押し出されて
+            見切れることがあったため、折り返し可能なバッジにしている */}
+        <span className={`my-number ${me.gender}`}>
+          あなた: No.{me.participantNumber}{me.nickname ? `（${me.nickname}）` : ''}
+        </span>
       </div>
 
       {phase === 'like_reveal' && (
