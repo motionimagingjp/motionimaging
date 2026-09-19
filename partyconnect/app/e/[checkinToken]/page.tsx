@@ -1,17 +1,19 @@
 'use client';
-import { use, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, use, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError, checkin } from '../../../lib/api';
 import { saveSessionToken } from '../../../lib/storage';
 
 /**
  * 掲示QR・4桁パスコードから開く受付ページ。
  * 参加者に性別を自己申告させないため、ここでは主催者が渡した6桁の引換コードを入力してもらう。
+ * 事前送付の個人QR（?code=）から開いた場合は、コードを自動入力しておく（仕様: 受付混雑の緩和）。
  */
-export default function ClaimPage({ params }: { params: Promise<{ checkinToken: string }> }) {
-  const { checkinToken } = use(params);
+function ClaimForm({ checkinToken }: { checkinToken: string }) {
   const router = useRouter();
-  const [claimCode, setClaimCode] = useState('');
+  const searchParams = useSearchParams();
+  const prefilled = (searchParams.get('code') ?? '').replace(/[^0-9]/g, '').slice(0, 6);
+  const [claimCode, setClaimCode] = useState(prefilled);
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +36,9 @@ export default function ClaimPage({ params }: { params: Promise<{ checkinToken: 
       <h1>受付</h1>
       <div className="card">
         <p>受付でお渡しした<strong>6桁の受付コード</strong>を入力してください。</p>
+        {prefilled.length === 6 && (
+          <p className="notice">個人QRからコードを自動入力しました。内容を確認して同意へお進みください。</p>
+        )}
         <label htmlFor="claim">受付コード</label>
         <input
           id="claim"
@@ -68,5 +73,14 @@ export default function ClaimPage({ params }: { params: Promise<{ checkinToken: 
         {busy ? '受付中…' : '受付する'}
       </button>
     </main>
+  );
+}
+
+export default function ClaimPage({ params }: { params: Promise<{ checkinToken: string }> }) {
+  const { checkinToken } = use(params);
+  return (
+    <Suspense fallback={<main><p className="muted">読み込み中…</p></main>}>
+      <ClaimForm checkinToken={checkinToken} />
+    </Suspense>
   );
 }

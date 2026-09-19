@@ -3,6 +3,7 @@ import { use, useCallback, useEffect, useState } from 'react';
 import { finalizeEvent, organizerCall, purgeEvent, type PendingVoter, type Progress } from '../../../lib/api';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { PROFILE_FIELDS } from '../../../lib/profile-options';
+import QrCode from '../../../components/QrCode';
 
 // ⑤最終希望のカウントダウン表示。過ぎても自動では閉じない（主催者が締め切るまで受付継続）
 const FINAL_VOTE_SECONDS = 150;
@@ -40,6 +41,8 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const [phaseUpdatedAt, setPhaseUpdatedAt] = useState<string | null>(null);
   const [previewResult, setPreviewResult] = useState<{ matchedPairsCount: number; oneSidedPairsCount: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [issueCount, setIssueCount] = useState(1);
+  const [openQrFor, setOpenQrFor] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -120,7 +123,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
 
   const issue = (gender: 'male' | 'female') => run(async () => {
     if (!token) return;
-    await organizerCall({ action: 'issue_slots', eventId, gender, count: 1, isProxy: true }, token);
+    await organizerCall({ action: 'issue_slots', eventId, gender, count: issueCount, isProxy: true }, token);
   });
 
   const withdraw = (row: RosterRow, withdrawn: boolean) => run(async () => {
@@ -264,13 +267,27 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
       <div className="card">
         <h2 style={{ marginTop: 0 }}>受付</h2>
         {checkinToken && (
-          <p className="muted" style={{ wordBreak: 'break-all' }}>
-            掲示用URL: {origin}/e/{checkinToken}
-          </p>
+          <>
+            <p className="muted" style={{ wordBreak: 'break-all' }}>
+              掲示用URL: {origin}/e/{checkinToken}
+            </p>
+            <QrCode value={`${origin}/e/${checkinToken}`} />
+            <p className="muted">会場の掲示物に印刷して、当日飛び込みの方はここから読み取ってもらえます。</p>
+          </>
         )}
-        <div style={{ display: 'grid', gap: 8 }}>
-          <button type="button" disabled={busy} onClick={() => issue('male')}>男性の枠を1つ発行</button>
-          <button type="button" disabled={busy} onClick={() => issue('female')}>女性の枠を1つ発行</button>
+        <label htmlFor="issueCount">まとめて発行する人数</label>
+        <input
+          id="issueCount"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={100}
+          value={issueCount}
+          onChange={(e) => setIssueCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
+        />
+        <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+          <button type="button" disabled={busy} onClick={() => issue('male')}>男性の枠を{issueCount}件発行</button>
+          <button type="button" disabled={busy} onClick={() => issue('female')}>女性の枠を{issueCount}件発行</button>
           {isDemo && (
             <button type="button" disabled={busy}
               onClick={() => run(async () => {
@@ -306,27 +323,50 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         <p className="muted">受付コードは受付でご本人にお伝えください。</p>
         <table>
           <thead>
-            <tr><th>性別</th><th>No.</th><th>受付コード</th><th>状態</th><th /></tr>
+            <tr><th>性別</th><th>No.</th><th>受付コード</th><th>状態</th><th /><th /></tr>
           </thead>
           <tbody>
-            {roster.map((row, index) => (
-              <tr key={`${row.gender}-${row.number ?? `pending-${index}`}`}>
-                <td>{row.gender === 'male' ? '男' : '女'}</td>
-                <td>{row.number ?? '—'}</td>
-                <td>{row.claimCode ?? '—'}</td>
-                <td>{row.status === 'withdrawn' ? '辞退' : row.status === 'active' ? '受付済' : '未受付'}</td>
-                <td>
-                  {row.number !== null && (
-                    <button type="button" className="inline" disabled={busy}
-                      onClick={() => withdraw(row, row.status !== 'withdrawn')}>
-                      {row.status === 'withdrawn' ? '戻す' : '辞退'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {roster.map((row, index) => {
+              const rowKey = `${row.gender}-${row.claimCode ?? row.number ?? index}`;
+              return (
+                <tr key={rowKey}>
+                  <td>{row.gender === 'male' ? '男' : '女'}</td>
+                  <td>{row.number ?? '—'}</td>
+                  <td>{row.claimCode ?? '—'}</td>
+                  <td>{row.status === 'withdrawn' ? '辞退' : row.status === 'active' ? '受付済' : '未受付'}</td>
+                  <td>
+                    {row.claimCode && checkinToken && (
+                      <button type="button" className="inline" disabled={busy}
+                        onClick={() => setOpenQrFor(openQrFor === rowKey ? null : rowKey)}>
+                        {openQrFor === rowKey ? '閉じる' : '個人QR'}
+                      </button>
+                    )}
+                  </td>
+                  <td>
+                    {row.number !== null && (
+                      <button type="button" className="inline" disabled={busy}
+                        onClick={() => withdraw(row, row.status !== 'withdrawn')}>
+                        {row.status === 'withdrawn' ? '戻す' : '辞退'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {roster.map((row, index) => {
+          const rowKey = `${row.gender}-${row.claimCode ?? row.number ?? index}`;
+          if (openQrFor !== rowKey || !row.claimCode || !checkinToken) return null;
+          return (
+            <div key={`qr-${rowKey}`} className="card" style={{ marginTop: 12 }}>
+              <p className="muted">
+                {row.gender === 'male' ? '男' : '女'}・受付コード {row.claimCode} の個人QR（事前にメール等で本人へ送付できます）
+              </p>
+              <QrCode value={`${origin}/e/${checkinToken}?code=${row.claimCode}`} />
+            </div>
+          );
+        })}
       </div>
     </main>
   );
