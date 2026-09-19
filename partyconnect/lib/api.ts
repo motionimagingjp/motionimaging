@@ -108,9 +108,12 @@ export const getResult = (sessionToken: string) =>
 
 // ---- 主催者向け ----
 
+export interface PendingVoter { gender: 'male' | 'female'; number: number }
+
 export interface Progress {
   invited: number; checkedIn: number; male: number; female: number;
   withdrawn: number; profileCompleted: number; likeVoted: number; finalVoted: number;
+  pendingLike: PendingVoter[]; pendingFinal: PendingVoter[];
 }
 
 export const organizerCall = <T>(body: Record<string, unknown>, accessToken: string) =>

@@ -9,9 +9,10 @@
  */
 import { requireOrganizer, serviceClient } from '../_shared/supabase.ts';
 import { AppError, json, preflight, readJson, toErrorResponse } from '../_shared/http.ts';
+import { computeMatching } from '../_shared/matching.ts';
 
 interface Body {
-  action: 'progress' | 'issue_slots' | 'roster' | 'withdraw' | 'pairs' | 'demo_seed';
+  action: 'progress' | 'issue_slots' | 'roster' | 'withdraw' | 'pairs' | 'demo_seed' | 'preview_result';
   eventId: string;
   gender?: 'male' | 'female';
   count?: number;
@@ -42,7 +43,7 @@ Deno.serve(async (req) => {
     const db = serviceClient();
 
     const { data: event, error: eventError } = await db
-      .from('events').select('id, organizer_id, is_demo').eq('id', body.eventId).single();
+      .from('events').select('id, organizer_id, is_demo, seed_value').eq('id', body.eventId).single();
     if (eventError) throw eventError;
     if (event.organizer_id !== organizerId) throw new AppError('権限がありません', 403);
 
@@ -50,7 +51,7 @@ Deno.serve(async (req) => {
       case 'progress': {
         const { data, error } = await db
           .from('participants')
-          .select('gender, status, participant_number, nickname')
+          .select('id, gender, status, participant_number, nickname')
           .eq('event_id', event.id);
         if (error) throw error;
 
@@ -62,6 +63,12 @@ Deno.serve(async (req) => {
         const likeVoters = new Set(voters.filter((v) => v.vote_type === 'like').map((v) => v.from_participant_id));
         const finalVoters = new Set(voters.filter((v) => v.vote_type === 'final').map((v) => v.from_participant_id));
 
+        // 会場で「男性N番さん、投票お願いします」と声かけできるよう、未投票の番号を返す
+        const pending = (voted: Set<string>) => active
+          .filter((p) => !voted.has(p.id) && p.participant_number !== null)
+          .map((p) => ({ gender: p.gender as 'male' | 'female', number: p.participant_number as number }))
+          .sort((a, b) => a.number - b.number);
+
         return json({
           invited: data.length,
           checkedIn: active.length,
@@ -71,6 +78,41 @@ Deno.serve(async (req) => {
           profileCompleted: active.filter((p) => p.nickname !== null && p.nickname !== '').length,
           likeVoted: likeVoters.size,
           finalVoted: finalVoters.size,
+          pendingLike: pending(likeVoters),
+          pendingFinal: pending(finalVoters),
+        });
+      }
+
+      case 'preview_result': {
+        // 配信前の内輪確認用。DBには何も書き込まない（確定は finalize_event のみが行う）
+        const { data: participants, error: pError } = await db
+          .from('participants').select('id, gender, status').eq('event_id', event.id);
+        if (pError) throw pError;
+        const active = participants.filter((p) => p.status === 'active');
+        const activeIds = new Set(active.map((p) => p.id as string));
+
+        const { data: votes, error: vError } = await db
+          .from('votes')
+          .select('from_participant_id, to_participant_id, vote_type, preference_order')
+          .eq('event_id', event.id).eq('vote_type', 'final');
+        if (vError) throw vError;
+
+        const nominations = votes
+          .filter((v) => activeIds.has(v.from_participant_id) && activeIds.has(v.to_participant_id))
+          .map((v) => ({
+            from: v.from_participant_id, to: v.to_participant_id, order: v.preference_order as number,
+          }));
+
+        const matching = computeMatching({
+          maleIds: active.filter((p) => p.gender === 'male').map((p) => p.id as string),
+          femaleIds: active.filter((p) => p.gender === 'female').map((p) => p.id as string),
+          nominations,
+          seed: event.seed_value,
+        });
+
+        return json({
+          matchedPairsCount: matching.pairs.length,
+          oneSidedPairsCount: matching.oneSidedPairsCount,
         });
       }
 
