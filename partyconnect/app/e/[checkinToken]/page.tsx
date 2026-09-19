@@ -38,7 +38,7 @@ export default function ClaimPage({ params }: { params: Promise<{ checkinToken: 
       <h1>チェックイン</h1>
       <div className="card">
         <p>
-          お持ちの<strong>6桁の受付コード</strong>を入力してください。
+          お持ちの<strong>受付コード</strong>を入力してください。
           お手元にない場合は、会場の受付でお声がけください。
         </p>
         <label htmlFor="claim">受付コード</label>
@@ -46,8 +46,8 @@ export default function ClaimPage({ params }: { params: Promise<{ checkinToken: 
           id="claim"
           inputMode="numeric"
           autoComplete="one-time-code"
-          maxLength={6}
-          placeholder="123456"
+          maxLength={7}
+          placeholder="1010473"
           style={{ fontSize: 28, letterSpacing: '0.3em', textAlign: 'center' }}
           value={claimCode}
           onChange={(e) => setClaimCode(e.target.value.replace(/[^0-9]/g, ''))}
@@ -69,7 +69,7 @@ export default function ClaimPage({ params }: { params: Promise<{ checkinToken: 
       <button
         type="button"
         className="primary"
-        disabled={busy || claimCode.length !== 6 || !agreed}
+        disabled={busy || claimCode.length < 6 || !agreed}
         onClick={submit}
       >
         {busy ? 'チェックイン中…' : 'チェックインする'}

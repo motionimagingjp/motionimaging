@@ -13,7 +13,8 @@ export interface ProfileField {
 export const PROFILE_FIELDS: ProfileField[] = [
   { key: 'age_group', label: '年代', options: ['20s', '30s', '40s', '50s+'] },
   { key: 'residence', label: '住まい', options: ['東京都', '関東', 'それ以外'] },
-  { key: 'hometown', label: '出身', options: ['地元', '県内', '県外', '海外'] },
+  // 出身は「地元/県内/県外」だとどこを基準にした話か人によってずれるため、住まいと同じ区分にそろえる
+  { key: 'hometown', label: '出身', options: ['東京都', '関東', 'それ以外'] },
   {
     key: 'occupation', label: '職業',
     options: ['IT', '医療', '公務員', 'サービス', '製造', '販売', '自営', '無職・バイト', 'その他'],
@@ -44,4 +45,12 @@ export function labelOf(key: string, value: string | string[]): string {
   if (key === 'age_group') return AGE_GROUP_LABEL[value] ?? value;
   if (key === 'height') return `${value}cm`;
   return value;
+}
+
+/**
+ * 主催者が「その項目を入れると参加者に何が聞かれるのか」を一目で判断できるようにする。
+ * 項目名だけだと選択肢の粒度が分からず、使う/使わないを決めにくい。
+ */
+export function optionsPreview(field: ProfileField): string {
+  return field.options.map((o) => labelOf(field.key, o)).join(' / ');
 }

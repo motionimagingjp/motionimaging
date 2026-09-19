@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
       case 'preview_result': {
         // 配信前の内輪確認用。DBには何も書き込まない（確定は finalize_event のみが行う）
         const { data: participants, error: pError } = await db
-          .from('participants').select('id, gender, status').eq('event_id', event.id);
+          .from('participants').select('id, gender, status, participant_number').eq('event_id', event.id);
         if (pError) throw pError;
         const active = participants.filter((p) => p.status === 'active');
         const activeIds = new Set(active.map((p) => p.id as string));
@@ -114,9 +114,20 @@ Deno.serve(async (req) => {
           seed: event.seed_value,
         });
 
+        // 配信前に「誰と誰が成立するか」を番号で確認できるようにする。
+        // 人数だけだと、意図と違う結果のまま配信してしまっても気づけない
+        const numberById = new Map(
+          participants.map((p) => [p.id as string, p.participant_number as number | null]),
+        );
         return json({
           matchedPairsCount: matching.pairs.length,
           oneSidedPairsCount: matching.oneSidedPairsCount,
+          pairs: matching.pairs
+            .map((pair) => ({
+              male: numberById.get(pair.maleId) ?? null,
+              female: numberById.get(pair.femaleId) ?? null,
+            }))
+            .sort((a, b) => (a.male ?? 0) - (b.male ?? 0)),
         });
       }
 
@@ -159,11 +170,12 @@ Deno.serve(async (req) => {
 
       case 'roster': {
         // 自由記述・投票は返さない。主催者に見せてよいのは番号と状態まで。
-        // session_token は事前送付リンク(/join?t=...)を作るために返す。
-        // ★このリンクはプロフィール入力専用で、出席登録の権限は持たない。
+        // ★session_token は返さない。事前リンクはイベント共通の1本(prelink_token)になり、
+        //   個人のセッショントークンを画面に出す必要が無くなったため。
+        //   （本人以外の手に渡ると、その人になりすましてプロフィールを書き換えられる）
         const { data, error } = await db
           .from('participants')
-          .select('id, gender, participant_number, status, nickname, claim_code, session_token')
+          .select('id, gender, participant_number, status, nickname, claim_code')
           .eq('event_id', event.id)
           .order('gender', { ascending: true })
           .order('participant_number', { ascending: true, nullsFirst: false });
@@ -175,19 +187,24 @@ Deno.serve(async (req) => {
             status: p.status,
             nickname: p.nickname,
             claimCode: p.claim_code,
-            sessionToken: p.session_token,
+            // △/○/◎ の判定に使う。中身は返さず「入っているか」だけ
+            hasProfile: p.nickname !== null && p.nickname !== '',
           })),
         });
       }
 
       case 'withdraw': {
-        if (body.gender === undefined || body.participantNumber === undefined) {
+        // 当日キャンセルの連絡が来た人は、まだ番号を持っていない（未チェックイン）。
+        // 番号だけを手がかりにすると辞退登録ができないので、受付コードでも引けるようにする
+        const query = db.from('participants').select('id').eq('event_id', event.id);
+        if (body.claimCode) {
+          query.eq('claim_code', body.claimCode);
+        } else if (body.gender !== undefined && body.participantNumber !== undefined) {
+          query.eq('gender', body.gender).eq('participant_number', body.participantNumber);
+        } else {
           throw new AppError('参加者を指定してください');
         }
-        const { data: target, error: targetError } = await db
-          .from('participants').select('id')
-          .eq('event_id', event.id).eq('gender', body.gender)
-          .eq('participant_number', body.participantNumber).single();
+        const { data: target, error: targetError } = await query.single();
         if (targetError) throw targetError;
 
         const { error } = await db.rpc('set_participant_withdrawn', {

@@ -89,12 +89,15 @@ label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px
 .tabs button { flex: 1; min-height: 48px; padding: 12px; }
 .tabs button[aria-pressed='true'] { background: var(--accent); color: var(--on-accent); }
 
-/* 自分の番号バッジ。一覧・投票画面のどこにいても自分が何番かを見失わないようにする */
+/* 自分の番号バッジ。一覧・投票画面のどこにいても自分が何番かを見失わないようにする。
+   押すと自分のプロフィール編集に入れる */
 .my-number {
   display: inline-block;
+  width: auto;
   font-weight: 700;
   font-size: 14px;
-  padding: 4px 12px;
+  padding: 6px 14px;
+  min-height: 0;
   border-radius: 999px;
   background: var(--surface);
   border: 1.5px solid currentColor;
@@ -122,6 +125,39 @@ label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px
 .person .free { font-size: 13px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
 .star { color: var(--accent); font-weight: 800; font-size: 13px; }
 
+/* カード本体（選択用）。カード自体に枠と背景があるので、中のボタンは素通しにする */
+.person-main {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  min-height: 0;
+}
+.person-main:disabled { opacity: 1; cursor: default; }
+
+/* 歓談中のメモ。端末内のみ（仕様どおりサーバーには送らない） */
+.memo-toggle {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.memo-input {
+  margin-top: 8px;
+  min-height: 64px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
 .countdown { font-size: 46px; font-weight: 800; text-align: center; letter-spacing: 0.02em; }
 
 .notice { border-left: 4px solid var(--accent); padding: 10px 14px; background: var(--surface-2); border-radius: 8px; }
@@ -136,3 +172,8 @@ label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+
+/* 進捗の「全員終わった」表示。数字を読み比べなくても一目で分かるようにする */
+.done-mark { color: var(--ok); font-weight: 800; white-space: nowrap; }
+/* 参加者の状態記号（△ 未受付 / ○ 受付済 / ◎ プロフ済 / × 辞退） */
+.state-mark { font-size: 18px; font-weight: 800; }

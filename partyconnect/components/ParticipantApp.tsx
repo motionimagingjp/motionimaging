@@ -5,7 +5,10 @@ import {
   type ListResult, type ResultPayload,
 } from '../lib/api';
 import { watchPhase } from '../lib/phase';
-import { loadSessionToken, loadVoteDraft, saveSessionToken, saveVoteDraft } from '../lib/storage';
+import {
+  clearEventLocalData, loadMemos, loadSessionToken, loadVoteDraft,
+  saveMemos, saveSessionToken, saveVoteDraft, type MemoMap,
+} from '../lib/storage';
 import PersonList from './PersonList';
 import ProfileForm from './ProfileForm';
 import ResultScreen from './ResultScreen';
@@ -16,6 +19,8 @@ interface Me {
   // null = まだ会場到着チェックインが済んでいない（事前入力のみ）
   participantNumber: number | null;
   nickname: string | null;
+  profileData: Record<string, string | string[]>;
+  freeText: string | null;
   enabledProfileFields: string[] | null;
 }
 
@@ -27,9 +32,11 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
   const [phase, setPhase] = useState<string>('checkin');
   const [step, setStep] = useState<'checkin' | 'arrive' | 'number' | 'profile' | 'event'>('checkin');
   const [agreed, setAgreed] = useState(false);
+  const [needsConsent, setNeedsConsent] = useState(false);
   const [list, setList] = useState<ListResult | null>(null);
   const [result, setResult] = useState<ResultPayload | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
+  const [memos, setMemos] = useState<MemoMap>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<'like' | 'final' | null>(null);
@@ -43,33 +50,63 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
     }
   }, [tokenFromUrl]);
 
-  const doCheckin = useCallback(async () => {
+  const openSession = useCallback(async (withConsent: boolean) => {
     if (!sessionToken) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await checkin({ sessionToken, agreed: true });
+      const res = await checkin({ sessionToken, agreed: withConsent });
+      setNeedsConsent(false);
       setMe({
-        eventId: (res as unknown as { eventId: string }).eventId,
+        eventId: res.eventId,
         gender: res.gender,
         participantNumber: res.participantNumber,
         nickname: res.nickname,
+        profileData: res.profileData ?? {},
+        freeText: res.freeText,
         enabledProfileFields: res.enabledProfileFields,
       });
       // 番号未確定 = まだ会場でチェックインしていない。事前入力の案内へ
       setStep(res.participantNumber === null ? 'arrive' : 'number');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '受付に失敗しました');
+      // 未同意なら同意画面を出す。すでに同意済みの人には二度と聞かない
+      if (e instanceof ApiError && e.code === 'consent_required') {
+        setNeedsConsent(true);
+      } else {
+        setError(e instanceof ApiError ? e.message : '受付に失敗しました');
+        setNeedsConsent(true);
+      }
     } finally {
       setBusy(false);
     }
   }, [sessionToken]);
+
+  // 一度同意した人は、会場でアプリを開き直しても同意画面を経由しないで戻れる
+  useEffect(() => {
+    if (!sessionToken || me) return;
+    void openSession(false);
+  }, [sessionToken, me, openSession]);
 
   // 一斉キックの受信。Realtime とポーリングの二重化は watchPhase 側で行う
   useEffect(() => {
     if (!me) return;
     return watchPhase(me.eventId, (next) => setPhase(next));
   }, [me]);
+
+  useEffect(() => {
+    if (!me) return;
+    setMemos(loadMemos(me.eventId));
+  }, [me]);
+
+  const updateMemo = (key: string, text: string) => {
+    if (!me) return;
+    setMemos((prev) => {
+      const next = { ...prev };
+      if (text.trim() === '') delete next[key]; else next[key] = text;
+      saveMemos(me.eventId, next);
+      return next;
+    });
+  };
 
   const refreshList = useCallback(async () => {
     if (!sessionToken) return;
@@ -82,7 +119,8 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
 
   useEffect(() => {
     if (!me || !LIST_PHASES.includes(phase)) return;
-    if (step !== 'event') setStep('event');
+    // プロフィール編集中は画面を奪わない（フェーズが進んでも入力を消さない）
+    if (step !== 'event' && step !== 'profile') setStep('event');
     void refreshList();
     // フェーズが変わったら選択状態は作り直す
     setSubmitted(null);
@@ -95,6 +133,13 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
     if (!sessionToken || (phase !== 'result' && phase !== 'purged')) return;
     void getResult(sessionToken).then(setResult).catch(() => setResult(null));
   }, [sessionToken, phase]);
+
+  // データ消去まで進んだら、端末に残したメモと下書きもここで消す
+  useEffect(() => {
+    if (phase !== 'purged' || !me) return;
+    clearEventLocalData(me.eventId);
+    setMemos({});
+  }, [phase, me]);
 
   const toggle = (target: number) => {
     setSelected((prev) => {
@@ -121,7 +166,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
   };
 
   // 0人のまま送信すると「誰にも好印象を送っていない」ことになる。
-  // 選び直し中の誤送信を防ぐため、0人の時だけ確認を挟む（仕様メモ対応）
+  // 選び直し中の誤送信を防ぐため、0人の時だけ確認を挟む
   const handleSendClick = (voteType: 'like' | 'final') => {
     if (selected.length === 0) {
       const label = voteType === 'like' ? '気になる方を1人も選んでいません' : '希望を1人も選んでいません';
@@ -136,8 +181,9 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         <h1>受付</h1>
         <div className="card">
           <p>
-            主催者からお送りした<strong>個別URL</strong>を開いてください。
-            お手元にない場合は、会場の受付でお声がけください。
+            主催者からお送りした<strong>事前リンク</strong>を開き、お手元の
+            <strong>受付コード</strong>を入力してください。
+            お困りの場合は、会場の受付でお声がけください。
           </p>
         </div>
       </main>
@@ -145,11 +191,14 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
   }
 
   if (!me) {
+    if (!needsConsent) {
+      return <main><p className="muted">読み込んでいます…</p></main>;
+    }
     return (
       <main>
         <h1>受付</h1>
         <div className="card">
-          <p>本日はご参加ありがとうございます。以下をご確認のうえ受付を完了してください。</p>
+          <p>お申し込みありがとうございます。以下をご確認のうえ受付を完了してください。</p>
           <ul className="muted" style={{ lineHeight: 1.9 }}>
             <li>お預かりするのはニックネームとプロフィールのみです</li>
             <li><strong>連絡先はお預かりしません</strong>（交換は会場で直接お願いします）</li>
@@ -166,7 +215,10 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
           </label>
         </div>
         {error && <div className="error">{error}</div>}
-        <button type="button" className="primary" disabled={!agreed || busy} onClick={doCheckin}>
+        <button
+          type="button" className="primary" disabled={!agreed || busy}
+          onClick={() => void openSession(true)}
+        >
           {busy ? '受付中…' : '受付する'}
         </button>
       </main>
@@ -182,12 +234,13 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
           <button type="button" className="primary" onClick={() => setStep('profile')}>
             プロフィールを{me.nickname ? '編集する' : '入力する'}
           </button>
+          {me.nickname && <p className="muted" style={{ marginBottom: 0 }}>入力済み：{me.nickname}</p>}
         </div>
         <div className="card">
           <h2 style={{ marginTop: 0 }}>当日のチェックイン</h2>
           <p>
             会場に到着したら、<strong>会場に掲示されているQRコード</strong>を読み取り、
-            お手元の6桁の受付コードを入力してください。そこで番号が決まります。
+            お手元の受付コードを入力してください。そこで番号が決まります。
           </p>
           {/* 出席の確認は会場でしか行えないようにしている。この画面からは登録できない（仕様） */}
           <p className="muted">
@@ -221,9 +274,14 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
       <main>
         <ProfileForm
           sessionToken={sessionToken}
-          initial={{ nickname: me.nickname }}
+          eventId={me.eventId}
+          initial={{ nickname: me.nickname, profileData: me.profileData, freeText: me.freeText }}
           enabledFields={me.enabledProfileFields}
-          onSaved={() => setStep(me.participantNumber === null ? 'arrive' : 'event')}
+          onSaved={(saved) => {
+            setMe({ ...me, ...saved });
+            setStep(me.participantNumber === null ? 'arrive' : 'event');
+          }}
+          onCancel={() => setStep(me.participantNumber === null ? 'arrive' : 'event')}
         />
       </main>
     );
@@ -263,6 +321,9 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         <div className="card">
           <p>まもなく開始します。主催者の案内をお待ちください。</p>
         </div>
+        <button type="button" onClick={() => setStep('profile')}>
+          自分のプロフィールを確認・修正する
+        </button>
       </main>
     );
   }
@@ -280,9 +341,13 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         </h1>
         {/* 自分の番号は必ず見える位置に出す。タイトルが長いと右端に押し出されて
             見切れることがあったため、折り返し可能なバッジにしている */}
-        <span className={`my-number ${me.gender}`}>
-          あなた: No.{me.participantNumber}{me.nickname ? `（${me.nickname}）` : ''}
-        </span>
+        <button
+          type="button" className={`my-number ${me.gender}`}
+          onClick={() => setStep('profile')}
+          title="自分のプロフィールを確認・修正する"
+        >
+          あなた: No.{me.participantNumber}{me.nickname ? `（${me.nickname}）` : ''} ✎
+        </button>
       </div>
 
       {phase === 'like_reveal' && (
@@ -311,6 +376,8 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
           selected={selected}
           onToggle={toggle}
           showStars={showStars}
+          memos={memos}
+          onMemoChange={updateMemo}
         />
       )}
 

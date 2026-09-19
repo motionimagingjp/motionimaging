@@ -6,22 +6,37 @@ import { loadProfileDraft, saveProfileDraft } from '../lib/storage';
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
+export interface SavedProfile {
+  nickname: string;
+  profileData: Record<string, string | string[]>;
+  freeText: string;
+}
+
 /**
  * プロフィールの確認・修正。原則は事前入力で、当日は確認だけで済ませる（仕様 4-1②）。
- * 入力は都度 localStorage に残す。会場の電波が切れても消えないようにするため。
+ *
+ * ★初期値はサーバーに保存済みの内容。空で開いてしまうと、確認しただけのつもりで
+ *   保存を押した人が入力済みの内容を消してしまう。
+ * ★入力は都度 localStorage に残す。会場の電波が切れても消えないようにするため。
  */
 export default function ProfileForm({
-  sessionToken, initial, enabledFields, onSaved,
+  sessionToken, eventId, initial, enabledFields, onSaved, onCancel,
 }: {
   sessionToken: string;
-  initial: { nickname: string | null };
+  eventId: string;
+  initial: {
+    nickname: string | null;
+    profileData: Record<string, string | string[]>;
+    freeText: string | null;
+  };
   enabledFields: string[] | null;
-  onSaved: () => void;
+  onSaved: (saved: SavedProfile) => void;
+  onCancel?: () => void;
 }) {
   const fields = enabledFields ? PROFILE_FIELDS.filter((f) => enabledFields.includes(f.key)) : PROFILE_FIELDS;
   const [nickname, setNickname] = useState(initial.nickname ?? '');
-  const [profileData, setProfileData] = useState<Record<string, string | string[]>>({});
-  const [freeText, setFreeText] = useState('');
+  const [profileData, setProfileData] = useState<Record<string, string | string[]>>(initial.profileData ?? {});
+  const [freeText, setFreeText] = useState(initial.freeText ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -47,24 +62,25 @@ export default function ProfileForm({
     }
   };
 
+  // 送信前に通信が切れた場合の復旧用。同じイベントの下書きだけを拾う
   useEffect(() => {
-    const draft = loadProfileDraft();
+    const draft = loadProfileDraft(eventId);
     if (!draft) return;
     if (draft.nickname) setNickname(draft.nickname);
-    setProfileData(draft.profileData ?? {});
-    setFreeText(draft.freeText ?? '');
-  }, []);
+    if (draft.profileData && Object.keys(draft.profileData).length > 0) setProfileData(draft.profileData);
+    if (draft.freeText) setFreeText(draft.freeText);
+  }, [eventId]);
 
   useEffect(() => {
-    saveProfileDraft({ nickname, profileData, freeText });
-  }, [nickname, profileData, freeText]);
+    saveProfileDraft({ eventId, nickname, profileData, freeText });
+  }, [eventId, nickname, profileData, freeText]);
 
   const submit = async () => {
     setSaving(true);
     setError(null);
     try {
       await saveProfile({ sessionToken, nickname, profileData, freeText });
-      onSaved();
+      onSaved({ nickname, profileData, freeText });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '保存に失敗しました');
     } finally {
@@ -160,10 +176,15 @@ export default function ProfileForm({
 
       {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
         <button type="button" className="primary" disabled={saving} onClick={submit}>
           {saving ? '保存中…' : 'この内容で登録する'}
         </button>
+        {onCancel && (
+          <button type="button" disabled={saving} onClick={onCancel}>
+            保存せずに戻る
+          </button>
+        )}
       </div>
     </div>
   );

@@ -18,13 +18,18 @@ export function preflight(): Response {
   return new Response('ok', { headers: corsHeaders });
 }
 
-/** アプリ側で意図的に投げるエラー。message はそのまま参加者に見せる */
+/**
+ * アプリ側で意図的に投げるエラー。message はそのまま参加者に見せる。
+ * code はクライアントが分岐に使う識別子（文言の一致で判定させないため）。
+ */
 export class AppError extends Error {
   readonly status: number;
-  constructor(message: string, status = 400) {
+  readonly code?: string;
+  constructor(message: string, status = 400, code?: string) {
     super(message);
     this.name = 'AppError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -37,7 +42,7 @@ export function toErrorResponse(error: unknown): Response {
     return json({ error: error.message, code: 'contact_info_rejected' }, 400);
   }
   if (error instanceof AppError) {
-    return json({ error: error.message }, error.status);
+    return json({ error: error.message, code: error.code }, error.status);
   }
   const pg = error as { code?: string; message?: string };
   if (pg?.code === '42501') return json({ error: '権限がありません' }, 403);

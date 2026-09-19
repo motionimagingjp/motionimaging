@@ -59,10 +59,14 @@ export async function callFunction<T>(
 
 export interface CheckinResult {
   sessionToken: string;
+  eventId: string;
   gender: 'male' | 'female';
   // null = まだ会場到着チェックインが済んでいない（事前入力のみの状態）
   participantNumber: number | null;
   nickname: string | null;
+  // 保存済みのプロフィール。編集画面をこれで初期化する（空で開くと上書き消去になる）
+  profileData: Record<string, string | string[]>;
+  freeText: string | null;
   // null = 全項目使用。イベントごとに主催者が使う項目だけを絞り込める
   enabledProfileFields: string[] | null;
 }
@@ -70,10 +74,12 @@ export interface CheckinResult {
 /**
  * 受付。
  *  - checkinToken + claimCode（会場掲示QR経由）: 出席登録・番号採番まで行われる
- *  - sessionToken（事前送付リンク経由）: セッションを開くだけ。出席登録はされない
+ *  - prelinkToken + claimCode（事前案内のイベント共通リンク経由）: 出席登録はされない
+ *  - sessionToken（端末に残ったセッション）: 出席登録はされない
  */
 export const checkin = (body: {
-  sessionToken?: string; checkinToken?: string; claimCode?: string; agreed: boolean;
+  sessionToken?: string; checkinToken?: string; prelinkToken?: string;
+  claimCode?: string; agreed: boolean;
 }) => callFunction<CheckinResult>('checkin', body);
 
 export const saveProfile = (body: {
@@ -142,6 +148,14 @@ export interface Progress {
   invited: number; checkedIn: number; male: number; female: number;
   withdrawn: number; profileCompleted: number; likeVoted: number; finalVoted: number;
   pendingLike: PendingVoter[]; pendingFinal: PendingVoter[];
+}
+
+export interface PairNumbers { male: number | null; female: number | null }
+
+export interface PreviewResult {
+  matchedPairsCount: number;
+  oneSidedPairsCount: number;
+  pairs: PairNumbers[];
 }
 
 export const organizerCall = <T>(body: Record<string, unknown>, accessToken: string) =>
