@@ -48,6 +48,12 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => setToken(data.session?.access_token ?? null));
+    // アクセストークンは裏側で自動更新される。ここで拾わないと、古いトークンのまま
+    // 使い続けて期限切れ後にすべての操作が401で失敗する
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setToken(session?.access_token ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
   }, [supabase]);
 
   const refresh = useCallback(async () => {
