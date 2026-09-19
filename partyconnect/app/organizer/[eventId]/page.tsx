@@ -1,5 +1,5 @@
 'use client';
-import { use, useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   finalizeEvent, organizerCall, purgeEvent,
   type PendingVoter, type PreviewResult, type Progress,
@@ -11,13 +11,16 @@ import QrCode from '../../../components/QrCode';
 // ⑤最終希望のカウントダウン表示。過ぎても自動では閉じない（主催者が締め切るまで受付継続）
 const FINAL_VOTE_SECONDS = 150;
 
-const PHASES: { key: string; label: string; hint: string }[] = [
-  { key: 'checkin', label: '① 参加者登録', hint: '会場のQRから番号を確定できるようになります' },
-  { key: 'browse', label: '② 歓談開始（一覧公開）', hint: '参加者が相手のプロフィールを見られます' },
-  { key: 'like_vote', label: '③ 好印象の投票開始', hint: '気になる人を選んでもらいます' },
-  { key: 'like_reveal', label: '④ 好印象を開示', hint: '★が付きます。誰から何件かは出しません' },
-  { key: 'final_vote', label: '⑤ 最終希望の受付開始', hint: '第1〜第3希望。150秒の目安を表示します' },
+/**
+ * フェーズの並び。今どこにいるか（済／実施中／これから）の判定に使う。
+ * event_states.phase の取り得る値と同じ順序で並べること。
+ */
+const PHASE_SEQUENCE = [
+  'draft', 'checkin', 'browse', 'like_vote', 'like_reveal', 'final_vote',
+  'calculating', 'result', 'purged',
 ];
+
+type StepState = 'done' | 'current' | 'future';
 
 interface RosterRow {
   gender: 'male' | 'female';
@@ -185,142 +188,190 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const elapsedSeconds = phaseUpdatedAt ? Math.floor((now - new Date(phaseUpdatedAt).getTime()) / 1000) : 0;
   const finalVoteCountdown = phase === 'final_vote' ? Math.max(0, FINAL_VOTE_SECONDS - elapsedSeconds) : null;
 
-  const pendingLabel = (list: PendingVoter[]) => {
-    const male = list.filter((p) => p.gender === 'male').map((p) => p.number).join('、');
-    const female = list.filter((p) => p.gender === 'female').map((p) => p.number).join('、');
-    return { male, female };
+  const currentIndex = PHASE_SEQUENCE.indexOf(phase);
+  const stateOf = (key: string): StepState => {
+    const i = PHASE_SEQUENCE.indexOf(key);
+    if (i < 0 || currentIndex < 0) return 'future';
+    return i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'future';
   };
 
-  // 「全員終わったか」を数字の比較ではなく記号で示す。会場では一瞬で判断したい
-  const doneMark = (done: number, total: number) =>
-    (total > 0 && done >= total ? <span className="done-mark">✓ 完了</span> : null);
+  /** 「男 2、3　女 1」の形にする。会場でそのまま読み上げられる並びにしておく */
+  const numbersText = (list: PendingVoter[]) => {
+    const male = list.filter((p) => p.gender === 'male').map((p) => p.number).join('、');
+    const female = list.filter((p) => p.gender === 'female').map((p) => p.number).join('、');
+    return [male && `男 ${male}`, female && `女 ${female}`].filter(Boolean).join('　');
+  };
 
   const pairText = (list: { male: number | null; female: number | null }[] | undefined) =>
     (list ?? []).map((p) => `男${p.male} × 女${p.female}`).join(' / ');
 
+  // 名簿から直接わかる進捗。サーバーに問い合わせを増やさない
+  const notArrived = roster.filter((r) => r.status !== 'withdrawn' && r.number === null);
+  // 大人数のイベントで画面が受付コードで埋まらないよう、先頭だけ出す
+  const notArrivedCodes = notArrived.length <= 8
+    ? `受付コード: ${notArrived.map((r) => r.claimCode).join('、')}`
+    : `受付コード: ${notArrived.slice(0, 8).map((r) => r.claimCode).join('、')} ほか${notArrived.length - 8}名`;
+  const noProfile = roster
+    .filter((r) => r.status === 'active' && r.number !== null && !r.hasProfile)
+    .map((r) => ({ gender: r.gender, number: r.number as number }));
+
+  /** 進捗バッジ。全員終わっていれば ✓ を付けて、数字を読み比べなくても分かるようにする */
+  const badge = (done: number, total: number) => {
+    const ok = total > 0 && done >= total;
+    return <span className={`step-count${ok ? ' ok' : ''}`}>{done}/{total}{ok ? ' ✓' : ''}</span>;
+  };
+
+  /**
+   * ステップ1行。
+   * ★進捗はボタンの右端に出す。進捗表を別カードに分けていた時は、
+   *   「全員終わっているのに次に進んでいない」「誰が残っているか分からない」に
+   *   気づけなかったため、ステップと進捗を必ず同じ行で見せる。
+   * ★コンポーネントではなく素の関数にしている。コンポーネントとして定義すると
+   *   1秒ごとのカウントダウン再描画のたびに型が変わり、Reactが毎秒作り直してしまう。
+   */
+  const renderStep = ({
+    phaseKey, label, hint, count, alert, children, onClick, className,
+  }: {
+    phaseKey: string;
+    label: string;
+    hint?: string;
+    count?: ReactNode;
+    alert?: string;
+    children?: ReactNode;
+    onClick: () => void;
+    className?: string;
+  }) => {
+    const state = stateOf(phaseKey);
+    const mark = state === 'done' ? '✓' : state === 'current' ? '●' : '○';
+    return (
+      <div key={phaseKey} className={`step ${state}`}>
+        <button type="button" className={`step-btn ${className ?? ''}`} disabled={busy} onClick={onClick}>
+          <span className="step-label"><span className="step-mark">{mark}</span>{label}</span>
+          {count}
+        </button>
+        {hint && <p className="step-note">{hint}</p>}
+        {alert && <p className="step-alert">{alert}</p>}
+        {children}
+      </div>
+    );
+  };
+
   return (
     <main>
       <h1>イベント進行</h1>
-      <p className="muted">現在のフェーズ: <strong>{phase}</strong></p>
       {message && <div className="error" style={{ marginBottom: 12 }}>{message}</div>}
 
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>進捗</h2>
+        <h2 style={{ marginTop: 0 }}>進行ステップ</h2>
         {progress ? (
-          <table>
-            <tbody>
-              <tr>
-                <th>受付済み</th>
-                <td>{progress.checkedIn} / {progress.invited} 名 {doneMark(progress.checkedIn, progress.invited)}</td>
-              </tr>
-              <tr><th>男女</th><td>男性 {progress.male} / 女性 {progress.female}</td></tr>
-              <tr>
-                <th>プロフ登録</th>
-                <td>
-                  {progress.profileCompleted} / {progress.checkedIn} 名
-                  {' '}{doneMark(progress.profileCompleted, progress.checkedIn)}
-                </td>
-              </tr>
-              <tr>
-                <th>好印象 投票済み</th>
-                <td>
-                  {progress.likeVoted} / {progress.checkedIn} 名
-                  {' '}{doneMark(progress.likeVoted, progress.checkedIn)}
-                  {/* ★フェーズが進んでも消えないようにする。人数だけでは誰が残っているか
-                      分からず、声かけできないまま次のフェーズに進んでしまっていた（実際の不具合） */}
-                  {progress.pendingLike.length > 0 && (
-                    <div className="muted" style={{ marginTop: 2 }}>
-                      未投票: {pendingLabel(progress.pendingLike).male && `男 ${pendingLabel(progress.pendingLike).male}`}
-                      {' '}{pendingLabel(progress.pendingLike).female && `女 ${pendingLabel(progress.pendingLike).female}`}
-                    </div>
-                  )}
-                </td>
-              </tr>
-              <tr>
-                <th>最終希望 投票済み</th>
-                <td>
-                  {progress.finalVoted} / {progress.checkedIn} 名
-                  {' '}{doneMark(progress.finalVoted, progress.checkedIn)}
-                  {progress.pendingFinal.length > 0 && (
-                    <div className="muted" style={{ marginTop: 2 }}>
-                      未投票: {pendingLabel(progress.pendingFinal).male && `男 ${pendingLabel(progress.pendingFinal).male}`}
-                      {' '}{pendingLabel(progress.pendingFinal).female && `女 ${pendingLabel(progress.pendingFinal).female}`}
-                    </div>
-                  )}
-                </td>
-              </tr>
-              <tr><th>辞退</th><td>{progress.withdrawn} 名</td></tr>
-            </tbody>
-          </table>
-        ) : <p className="muted">読み込み中…</p>}
-        <p className="muted" style={{ marginBottom: 0 }}>
-          この表は5秒ごとに自動更新されます（再読み込みは不要です）。
-          参加者が「選び直す」で送信を取り消した場合も、この数に反映されます。
-        </p>
-      </div>
+          <p className="muted" style={{ marginTop: 0 }}>
+            受付済み <strong>{progress.checkedIn}</strong>名（男性 {progress.male} / 女性 {progress.female}）
+            {progress.withdrawn > 0 && <>・辞退 {progress.withdrawn}名</>}
+            <br />5秒ごとに自動更新されます（再読み込みは不要です）。
+          </p>
+        ) : <p className="muted" style={{ marginTop: 0 }}>読み込み中…</p>}
 
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>一斉キック</h2>
-        <div style={{ display: 'grid', gap: 8 }}>
-          {PHASES.map((p) => (
-            <div key={p.key}>
-              <button type="button" disabled={busy}
-                className={phase === p.key ? 'primary' : ''} onClick={() => kick(p.key)}>
-                {p.label}
-              </button>
-              <p className="muted" style={{ margin: '4px 0 0' }}>{p.hint}</p>
-            </div>
-          ))}
+        <div className="steps">
+          {renderStep({
+            phaseKey: 'checkin',
+            label: '① 参加者登録',
+            hint: '会場のQRから番号を確定できるようになります',
+            count: progress ? badge(progress.checkedIn, progress.invited) : undefined,
+            alert: notArrived.length > 0 ? `未受付 ${notArrived.length}名（${notArrivedCodes}）` : undefined,
+            onClick: () => kick('checkin'),
+          })}
 
-          {/* 未投票の一覧は上の「進捗」カードに常時表示するため、ここでは繰り返さない */}
+          {renderStep({
+            phaseKey: 'browse',
+            label: '② 歓談開始（一覧公開）',
+            hint: '参加者が相手のプロフィールを見られます',
+            count: progress ? badge(progress.profileCompleted, progress.checkedIn) : undefined,
+            alert: noProfile.length > 0 ? `プロフ未入力: ${numbersText(noProfile)}` : undefined,
+            onClick: () => kick('browse'),
+          })}
 
-          {phase === 'final_vote' && (
-            <>
-              <p className="countdown" style={{ margin: 0 }}>残り {finalVoteCountdown} 秒</p>
-              <p className="muted" style={{ margin: 0 }}>
-                時間が来ても自動では締め切りません。締め切るまで投票は受け付けます。
-              </p>
-              <button type="button" disabled={busy} onClick={() => kick('calculating')}>
-                投票を締め切って集計する
-              </button>
-            </>
-          )}
+          {renderStep({
+            phaseKey: 'like_vote',
+            label: '③ 好印象の投票開始',
+            hint: '気になる人を選んでもらいます',
+            count: progress ? badge(progress.likeVoted, progress.checkedIn) : undefined,
+            alert: progress && progress.pendingLike.length > 0
+              ? `未投票: ${numbersText(progress.pendingLike)}` : undefined,
+            onClick: () => kick('like_vote'),
+          })}
 
-          {phase === 'calculating' && (
-            <div className="notice">
-              {previewResult ? (
-                <>
-                  <p style={{ margin: 0 }}>
-                    <strong>本日は {previewResult.matchedPairsCount} 組マッチしました</strong>
-                    （まだ参加者には配信されていません）
-                  </p>
-                  {(previewResult.pairs ?? []).length > 0 && (
-                    <p style={{ margin: '6px 0 0' }}>成立: {pairText(previewResult.pairs)}</p>
-                  )}
-                  <p className="muted" style={{ margin: '6px 0 0' }}>
-                    片想いのみ {previewResult.oneSidedPairsCount} 組（成立しません）
-                  </p>
-                </>
-              ) : '集計中…'}
-            </div>
-          )}
+          {renderStep({
+            phaseKey: 'like_reveal',
+            label: '④ 好印象を開示',
+            hint: '★が付きます。誰から何件かは出しません',
+            onClick: () => kick('like_reveal'),
+          })}
 
-          <button type="button" className="primary" disabled={busy}
-            onClick={() => run(
+          {renderStep({
+            phaseKey: 'final_vote',
+            label: '⑤ 最終希望の受付開始',
+            hint: '第1〜第3希望。150秒の目安を表示します',
+            count: progress ? badge(progress.finalVoted, progress.checkedIn) : undefined,
+            alert: progress && progress.pendingFinal.length > 0
+              ? `未投票: ${numbersText(progress.pendingFinal)}` : undefined,
+            onClick: () => kick('final_vote'),
+            children: phase === 'final_vote' && (
+              <div style={{ marginTop: 8 }}>
+                <p className="countdown" style={{ margin: 0 }}>残り {finalVoteCountdown} 秒</p>
+                <p className="step-note" style={{ textAlign: 'center' }}>
+                  時間が来ても自動では締め切りません。締め切るまで投票は受け付けます。
+                </p>
+                <button type="button" disabled={busy} onClick={() => kick('calculating')}>
+                  投票を締め切って集計する
+                </button>
+              </div>
+            ),
+          })}
+
+          {renderStep({
+            phaseKey: 'calculating',
+            label: '⑥ 確定して結果を配信',
+            hint: 'ここを押すまで参加者には結果が届きません',
+            count: previewResult
+              ? <span className="step-count ok">{previewResult.matchedPairsCount}組</span>
+              : undefined,
+            // 出番が来たときだけ色を点ける。常時フルカラーだと現在のステップより目立ってしまう
+            className: phase === 'calculating' ? 'primary' : '',
+            onClick: () => run(
               () => finalizeEvent(eventId, token),
               previewResult
                 ? `${previewResult.matchedPairsCount} 組（${pairText(previewResult.pairs)}）を確定して結果を配信しますか？`
                 : `最終希望の登録は ${progress?.finalVoted ?? 0} / ${progress?.checkedIn ?? 0} 名です。確定して結果を配信しますか？`,
-            )}>
-            ⑥ 確定して結果を配信
-          </button>
-          <button type="button" className="danger" disabled={busy}
-            onClick={() => run(
+            ),
+            children: phase === 'calculating' && (
+              <div className="notice" style={{ marginTop: 8 }}>
+                {previewResult ? (
+                  <>
+                    <p style={{ margin: 0 }}>
+                      <strong>配信前の確認：{previewResult.matchedPairsCount} 組が成立します</strong>
+                    </p>
+                    {(previewResult.pairs ?? []).length > 0 && (
+                      <p style={{ margin: '6px 0 0' }}>{pairText(previewResult.pairs)}</p>
+                    )}
+                    <p className="muted" style={{ margin: '6px 0 0' }}>
+                      片想いのみ {previewResult.oneSidedPairsCount} 組（成立しません）
+                    </p>
+                  </>
+                ) : <p style={{ margin: 0 }}>集計中…</p>}
+              </div>
+            ),
+          })}
+
+          {renderStep({
+            phaseKey: 'purged',
+            label: '⑦ データを今すぐ消去',
+            hint: 'イベント終了30分後には自動でも消去されます',
+            className: phase === 'result' || phase === 'purged' ? 'danger' : '',
+            onClick: () => run(
               () => purgeEvent(eventId, token),
               '参加者のプロフィールと投票データを今すぐ消去します。よろしいですか？',
-            )}>
-            ⑦ データを今すぐ消去
-          </button>
+            ),
+          })}
         </div>
       </div>
 
@@ -343,7 +394,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
       )}
 
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>① 枠を発行する（申し込みを受けたら）</h2>
+        <h2 style={{ marginTop: 0 }}>準備1: 枠を発行する（申し込みを受けたら）</h2>
         <p className="muted">
           申し込み人数ぶんの枠をまとめて発行します。1枠につき受付コードが1つ発行されます。
           コードは先頭1桁が性別（1=男性 / 2=女性）、続く2桁が登録順です。
@@ -374,7 +425,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
 
       {prelinkUrl && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>② 事前案内を送る（全員に同じリンク）</h2>
+          <h2 style={{ marginTop: 0 }}>準備2: 事前案内を送る（全員に同じリンク）</h2>
           <p className="muted">
             リンクはこの1本だけです。参加者ごとに違うURLを作る必要はありません。
             メールには<strong>このリンクとご本人の受付コード</strong>を書いてください。
@@ -410,7 +461,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
 
       {checkinToken && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>③ 当日の受付（会場に掲示するQR）</h2>
+          <h2 style={{ marginTop: 0 }}>当日の受付（会場に掲示するQR）</h2>
           <div className="notice" style={{ marginBottom: 12 }}>
             <strong>このQRは会場に掲示する専用です。事前にメール等で送らないでください。</strong>
             <br />

@@ -13,6 +13,9 @@
   --danger: #e0393c;
   --on-danger: #ffffff;
   --ok: #16a34a;
+  /* 声かけが必要な箇所。エラー(赤)ではないが見落とすと進行が止まる、の中間色 */
+  --warn-bg: #fff6e5;
+  --warn-text: #8a5a00;
   --radius: 14px;
 }
 
@@ -173,7 +176,70 @@ label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
 
-/* 進捗の「全員終わった」表示。数字を読み比べなくても一目で分かるようにする */
-.done-mark { color: var(--ok); font-weight: 800; white-space: nowrap; }
 /* 参加者の状態記号（△ 未受付 / ○ 受付済 / ◎ プロフ済 / × 辞退） */
 .state-mark { font-size: 18px; font-weight: 800; }
+
+/* ---------------------------------------------------------------------------
+   進行ステップ。
+   「今どこにいるか」と「その段階が何人終わったか」を必ず同じ行で見せる。
+   進捗を別カードに分けていた時は、全員終わっているのに次へ進んでいないことや、
+   誰が残っているのかに気づけなかった。
+   --------------------------------------------------------------------------- */
+.steps { display: grid; gap: 10px; }
+
+.step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 8px;
+}
+/* 実施中のステップだけを強調する。会場では一瞬で現在地を判断したい */
+.step.current { border: 2px solid var(--accent); background: var(--surface-2); padding: 7px; }
+.step.done { opacity: 0.6; }
+
+.step-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  min-height: 52px;
+  padding: 12px 14px;
+  background: transparent;
+}
+.step.current .step-btn { background: var(--surface); }
+/* 実施中の背景指定(.step.current .step-btn)より詳細度を上げておく。
+   でないと、そのステップが実施中になった瞬間に色が白へ上書きされてしまう */
+.step-btn.primary,
+.step.current .step-btn.primary { background: var(--accent); color: var(--on-accent); }
+.step-btn.danger,
+.step.current .step-btn.danger { background: var(--danger); color: var(--on-danger); }
+
+.step-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.step-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex: 0 0 auto;
+  font-size: 13px; font-weight: 800;
+  border-radius: 50%;
+  background: var(--surface-2); color: var(--muted);
+}
+.step.current .step-mark { background: var(--accent); color: var(--on-accent); }
+.step.done .step-mark { background: var(--ok); color: var(--on-accent); }
+/* 色付きボタンの上では白抜きにする（白丸だと浮いて見える） */
+.step-btn.primary .step-mark, .step-btn.danger .step-mark {
+  background: rgba(255, 255, 255, 0.25); color: var(--on-accent);
+}
+
+/* 進捗はボタンの右端。ラベルが長くても縮まないようにする */
+.step-count { font-size: 15px; font-weight: 800; white-space: nowrap; flex: 0 0 auto; }
+.step-count.ok { color: var(--ok); }
+.step-btn.primary .step-count.ok, .step-btn.danger .step-count.ok { color: var(--on-accent); }
+
+.step-note { font-size: 13px; color: var(--muted); margin: 6px 6px 0; line-height: 1.6; }
+/* 声かけが必要な人の番号。見落とすと進行が止まるので色を分ける */
+.step-alert {
+  font-size: 13px; font-weight: 700; line-height: 1.6;
+  margin: 6px 0 0; padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--warn-bg); color: var(--warn-text);
+}
