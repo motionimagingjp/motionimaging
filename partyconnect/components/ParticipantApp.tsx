@@ -120,6 +120,16 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
     }
   };
 
+  // 0人のまま送信すると「誰にも好印象を送っていない」ことになる。
+  // 選び直し中の誤送信を防ぐため、0人の時だけ確認を挟む（仕様メモ対応）
+  const handleSendClick = (voteType: 'like' | 'final') => {
+    if (selected.length === 0) {
+      const label = voteType === 'like' ? '気になる方を1人も選んでいません' : '希望を1人も選んでいません';
+      if (!window.confirm(`${label}。このまま0人で送信しますか？`)) return;
+    }
+    void send(voteType);
+  };
+
   if (!sessionToken) {
     return (
       <main>
@@ -306,7 +316,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
             {submitted === mode
               ? <button type="button" onClick={() => setSubmitted(null)}>送信しました（選び直す）</button>
               : (
-                <button type="button" className="primary" disabled={busy} onClick={() => send(mode)}>
+                <button type="button" className="primary" disabled={busy} onClick={() => handleSendClick(mode)}>
                   {busy ? '送信中…' : `${selected.length}名を送信する`}
                 </button>
               )}
