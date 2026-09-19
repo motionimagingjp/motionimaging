@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ApiError, saveProfile } from '../lib/api';
+import { ApiError, saveProfile, uploadPhoto } from '../lib/api';
 import { PROFILE_FIELDS, labelOf } from '../lib/profile-options';
 import { loadProfileDraft, saveProfileDraft } from '../lib/storage';
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 /**
  * プロフィールの確認・修正。原則は事前入力で、当日は確認だけで済ませる（仕様 4-1②）。
@@ -22,6 +24,28 @@ export default function ProfileForm({
   const [freeText, setFreeText] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoMessage, setPhotoMessage] = useState<string | null>(null);
+
+  const onPhotoSelected = async (file: File | undefined) => {
+    if (!file) return;
+    setPhotoMessage(null);
+    if (file.size > MAX_PHOTO_BYTES) {
+      setPhotoMessage('写真は5MB以内にしてください');
+      return;
+    }
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoUploading(true);
+    try {
+      await uploadPhoto(sessionToken, file);
+      setPhotoMessage('写真を登録しました');
+    } catch (e) {
+      setPhotoMessage(e instanceof ApiError ? e.message : 'アップロードに失敗しました');
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
 
   useEffect(() => {
     const draft = loadProfileDraft();
@@ -63,6 +87,25 @@ export default function ProfileForm({
         placeholder="例: たろう"
         onChange={(e) => setNickname(e.target.value)}
       />
+
+      <label htmlFor="photo">写真（任意）</label>
+      <p className="muted" style={{ marginTop: -4 }}>
+        顔でなくても大丈夫です（料理・趣味の写真など）。イベント終了後に自動で消去されます。
+      </p>
+      {photoPreview && (
+        <img src={photoPreview} alt="" style={{
+          width: 96, height: 96, objectFit: 'cover', borderRadius: 'var(--radius)', marginBottom: 8,
+        }} />
+      )}
+      <input
+        id="photo"
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        disabled={photoUploading}
+        onChange={(e) => onPhotoSelected(e.target.files?.[0])}
+      />
+      {photoUploading && <p className="muted">アップロード中…</p>}
+      {photoMessage && <p className="muted">{photoMessage}</p>}
 
       {fields.map((field) => {
         const isMulti = field.type === 'multi';

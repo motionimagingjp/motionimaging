@@ -12,6 +12,9 @@ import { PostgresEventKeyStore } from '../_shared/key-store.ts';
 
 interface Body { sessionToken: string }
 
+const PHOTO_BUCKET = 'participant-photos';
+const PHOTO_URL_TTL_SECONDS = 1800;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return preflight();
   try {
@@ -49,12 +52,22 @@ Deno.serve(async (req) => {
     const keyStore = new PostgresEventKeyStore(db);
     const dataKey = await keyStore.getKey(session.eventId);
 
+    // 写真は都度、期限付きの閲覧URLを発行する（存在しない参加者はエラーになるので null 扱いにする）
+    const photoPaths = data.map((p) => `${session.eventId}/${p.id}`);
+    const { data: signedPhotos } = photoPaths.length > 0
+      ? await db.storage.from(PHOTO_BUCKET).createSignedUrls(photoPaths, PHOTO_URL_TTL_SECONDS)
+      : { data: [] as { path: string | null; signedUrl: string; error: string | null }[] };
+    const photoUrlByPath = new Map(
+      (signedPhotos ?? []).filter((s) => !s.error && s.path).map((s) => [s.path as string, s.signedUrl]),
+    );
+
     const cards = await Promise.all(data.map(async (p) => ({
       gender: p.gender,
       number: p.participant_number,
       nickname: p.nickname,
       profile: p.profile_data,
       freeText: await decryptOptional(p.free_text, dataKey),
+      photoUrl: photoUrlByPath.get(`${session.eventId}/${p.id}`) ?? null,
       isSelf: p.id === session.id,
       likedMe: likedByNumbers.has(p.participant_number as number),
     })));

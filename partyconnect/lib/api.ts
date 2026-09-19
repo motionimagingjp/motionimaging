@@ -1,7 +1,11 @@
 /**
  * Edge Function クライアント。
  * 参加者は Supabase のテーブルを直接触らない（RLSがデフォルト拒否）。通信は必ずここを通す。
+ * 例外は写真アップロードのみ：署名付きURLへのPUTはRLSもテーブルアクセスも経由しないため、
+ * ここでだけ Supabase Storage クライアントを直接使う。
  */
+import { createClient } from '@supabase/supabase-js';
+
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
@@ -70,12 +74,30 @@ export const saveProfile = (body: {
   sessionToken: string; nickname: string; profileData: Record<string, string | string[]>; freeText: string;
 }) => callFunction<{ ok: true }>('save_profile', body);
 
+export const getPhotoUploadUrl = (sessionToken: string) =>
+  callFunction<{ path: string; token: string }>('photo', { sessionToken });
+
+let storageOnlyClient: ReturnType<typeof createClient> | null = null;
+function storageClient() {
+  if (!storageOnlyClient) storageOnlyClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return storageOnlyClient;
+}
+
+export async function uploadPhoto(sessionToken: string, file: File): Promise<void> {
+  const { path, token } = await getPhotoUploadUrl(sessionToken);
+  const { error } = await storageClient().storage
+    .from('participant-photos')
+    .uploadToSignedUrl(path, token, file, { upsert: true, contentType: file.type });
+  if (error) throw new ApiError(error.message, 0);
+}
+
 export interface ParticipantCard {
   gender: 'male' | 'female';
   number: number;
   nickname: string | null;
   profile: Record<string, string | string[]>;
   freeText: string | null;
+  photoUrl: string | null;
   isSelf: boolean;
   likedMe: boolean;
 }

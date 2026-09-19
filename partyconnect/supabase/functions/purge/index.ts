@@ -4,10 +4,21 @@
  *   - 手動キック: 主催者が自分のイベントを30分待たずに消去する
  * どちらも purge_event を通るため、統計の書き込み確認は必ず行われる（仕様 12-5）。
  */
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.45.4';
 import { requireOrganizer, serviceClient } from '../_shared/supabase.ts';
 import { AppError, json, preflight, readJson, toErrorResponse } from '../_shared/http.ts';
 
 interface Body { eventId?: string }
+
+const PHOTO_BUCKET = 'participant-photos';
+
+// DBの行を消しても、Storageの実体は別途削除しないと残り続ける（仕様7-4のcrypto-shreddingと同じ発想）
+async function cleanupPhotos(db: SupabaseClient, eventId: string): Promise<void> {
+  const { data: files } = await db.storage.from(PHOTO_BUCKET).list(eventId);
+  if (files && files.length > 0) {
+    await db.storage.from(PHOTO_BUCKET).remove(files.map((f) => `${eventId}/${f.name}`));
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return preflight();
@@ -20,13 +31,15 @@ Deno.serve(async (req) => {
     if (cronSecret && provided && provided === cronSecret) {
       const { data, error } = await db.rpc('purge_due_events');
       if (error) throw error;
+      const purgedIds = (data as string[] | null) ?? [];
+      for (const id of purgedIds) await cleanupPhotos(db, id);
       // 統計が書けないまま止まっているイベントは削除せず、通知できるように返す
       const { data: stuck, error: stuckError } = await db.rpc('list_stuck_events');
       if (stuckError) throw stuckError;
       if (Array.isArray(stuck) && stuck.length > 0) {
         console.error('統計未書き込みのまま滞留しているイベントがあります', stuck);
       }
-      return json({ purgedCount: data, stuckCount: Array.isArray(stuck) ? stuck.length : 0 });
+      return json({ purgedCount: purgedIds.length, stuckCount: Array.isArray(stuck) ? stuck.length : 0 });
     }
 
     // 主催者による手動消去
@@ -46,6 +59,7 @@ Deno.serve(async (req) => {
       p_allow_before_deadline: true,
     });
     if (error) throw error;
+    if (data === true) await cleanupPhotos(db, body.eventId);
     return json({ purged: data === true });
   } catch (error) {
     return toErrorResponse(error);

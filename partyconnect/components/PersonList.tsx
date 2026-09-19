@@ -72,6 +72,12 @@ export default function PersonList({
               disabled={!selectable || p.isSelf}
               onClick={() => onToggle(p.number)}
             >
+              {p.photoUrl && (
+                <img src={p.photoUrl} alt="" style={{
+                  width: '100%', aspectRatio: '1 / 1', objectFit: 'cover',
+                  borderRadius: 'var(--radius)', marginBottom: 6,
+                }} />
+              )}
               <div className="no">
                 No.{p.number}
                 {p.isSelf && <span className="muted" style={{ fontSize: 13 }}>（あなた）</span>}
