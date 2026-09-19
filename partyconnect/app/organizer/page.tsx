@@ -5,7 +5,32 @@ import { supabaseBrowser } from '../../lib/supabase-browser';
 
 interface EventRow {
   id: string; event_name: string; event_date: string | null;
+  event_time: string | null; checkin_time: string | null;
   status: string; is_demo: boolean; passcode: string;
+}
+
+const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+
+function formatSchedule(row: EventRow): string {
+  if (!row.event_date) return '日時未設定';
+  const d = new Date(`${row.event_date}T00:00:00`);
+  const dateLabel = `${row.event_date}（${WEEKDAY_LABELS[d.getDay()]}）`;
+  if (!row.event_time) return dateLabel;
+  const checkinLabel = row.checkin_time ? `　（受付開始 ${row.checkin_time}）` : '';
+  return `${dateLabel} ${row.event_time}開催${checkinLabel}`;
+}
+
+// 15分前を「HH:MM」で返す。時刻をまたぐ繰り下がりも処理する
+function minutesBefore(time: string, minutes: number): string {
+  const [h, m] = time.split(':').map(Number);
+  const total = (h * 60 + m - minutes + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function defaultEventDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 7);
+  return d.toISOString().slice(0, 10);
 }
 
 export default function OrganizerHome() {
@@ -14,13 +39,23 @@ export default function OrganizerHome() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [eventName, setEventName] = useState('');
+  const [eventDate, setEventDate] = useState(defaultEventDate);
+  const [eventTime, setEventTime] = useState('13:00');
+  const [checkinTime, setCheckinTime] = useState('12:45');
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 開催時刻を変えたら、受付開始時刻もデフォルトの「15分前」に追従させる
+  const onEventTimeChange = (value: string) => {
+    setEventTime(value);
+    setCheckinTime(minutesBefore(value, 15));
+  };
+
   const loadEvents = useCallback(async () => {
     const { data } = await supabase
-      .from('events').select('id, event_name, event_date, status, is_demo, passcode')
+      .from('events')
+      .select('id, event_name, event_date, event_time, checkin_time, status, is_demo, passcode')
       .order('created_at', { ascending: false });
     setEvents((data ?? []) as EventRow[]);
   }, [supabase]);
@@ -58,8 +93,10 @@ export default function OrganizerHome() {
       if (orgError) throw orgError;
       const { error } = await supabase.rpc('create_event', {
         p_event_name: isDemo ? 'デモイベント' : eventName,
-        p_event_date: new Date().toISOString().slice(0, 10),
+        p_event_date: isDemo ? new Date().toISOString().slice(0, 10) : eventDate,
         p_is_demo: isDemo,
+        p_event_time: isDemo ? null : eventTime,
+        p_checkin_time: isDemo ? null : checkinTime,
       });
       if (error) throw error;
       setEventName('');
@@ -101,6 +138,12 @@ export default function OrganizerHome() {
         <input id="phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
         <label htmlFor="name">イベント名</label>
         <input id="name" value={eventName} onChange={(e) => setEventName(e.target.value)} />
+        <label htmlFor="eventDate">開催日</label>
+        <input id="eventDate" type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+        <label htmlFor="eventTime">開催時刻</label>
+        <input id="eventTime" type="time" value={eventTime} onChange={(e) => onEventTimeChange(e.target.value)} />
+        <label htmlFor="checkinTime">受付開始時刻</label>
+        <input id="checkinTime" type="time" value={checkinTime} onChange={(e) => setCheckinTime(e.target.value)} />
         <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
           <button type="button" className="primary" disabled={busy || !eventName || !phone}
             onClick={() => createEvent(false)}>
@@ -120,8 +163,9 @@ export default function OrganizerHome() {
           style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
           <strong>{event.event_name}</strong>
           {event.is_demo && <span className="star"> デモ</span>}
+          <div className="muted">{formatSchedule(event)}</div>
           <div className="muted">
-            {event.event_date ?? '日付未設定'} / {event.status} / 4桁コード {event.passcode}
+            {event.status} / 4桁コード {event.passcode}
           </div>
         </Link>
       ))}
