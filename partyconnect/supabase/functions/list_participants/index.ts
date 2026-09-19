@@ -1,6 +1,9 @@
 /**
  * 閲覧一覧。
  * ★参加者IDはクライアントへ一切返さない。やり取りは参加者番号だけで行う。
+ * ★異性の参加者だけを返す。同性のプロフィールは通信内容にも含めない。
+ *   参加者番号は男女それぞれ1から振り直されるため、同性を混ぜると「男性2番」と
+ *   「女性2番」が同じ数字になり、好印象(★)が別人に誤表示される（実際に発生した不具合）。
  * ★辞退者は返さない（仕様 6-6）。
  * ★好印象の★は like_reveal フェーズ以降のみ。それ以前は誰が誰に投票したかを一切返さない。
  */
@@ -23,17 +26,20 @@ Deno.serve(async (req) => {
     const session = await requireParticipant(db, body.sessionToken);
     assertPhase(session, ['browse', 'like_vote', 'like_reveal', 'final_vote', 'calculating', 'result']);
 
+    const oppositeGender = session.gender === 'male' ? 'female' : 'male';
     const { data, error } = await db
       .from('participants')
       .select('id, gender, participant_number, nickname, profile_data, free_text')
       .eq('event_id', session.eventId)
+      .eq('gender', oppositeGender)
       .eq('status', 'active')
       .not('participant_number', 'is', null)
       .order('participant_number', { ascending: true });
     if (error) throw error;
 
-    // 自分に好印象を送った相手の番号。開示フェーズ以降のみ集計する
-    const likedByNumbers = new Set<number>();
+    // 自分に好印象を送った相手。★を誰に付けるかは必ずIDで判定する。
+    // 番号で判定すると、男女で番号が重複しているため別人に★が付く
+    const likedMeIds = new Set<string>();
     if (['like_reveal', 'final_vote', 'calculating', 'result'].includes(session.phase)) {
       const { data: likes, error: likeError } = await db
         .from('votes')
@@ -42,11 +48,7 @@ Deno.serve(async (req) => {
         .eq('vote_type', 'like')
         .eq('to_participant_id', session.id);
       if (likeError) throw likeError;
-      const numberById = new Map(data.map((p) => [p.id, p.participant_number as number]));
-      for (const like of likes) {
-        const n = numberById.get(like.from_participant_id);
-        if (n !== undefined) likedByNumbers.add(n);
-      }
+      for (const like of likes) likedMeIds.add(like.from_participant_id as string);
     }
 
     const keyStore = new PostgresEventKeyStore(db);
@@ -68,8 +70,9 @@ Deno.serve(async (req) => {
       profile: p.profile_data,
       freeText: await decryptOptional(p.free_text, dataKey),
       photoUrl: photoUrlByPath.get(`${session.eventId}/${p.id}`) ?? null,
-      isSelf: p.id === session.id,
-      likedMe: likedByNumbers.has(p.participant_number as number),
+      // 異性しか返さないので自分は一覧に含まれない。互換のため常にfalseで残す
+      isSelf: false,
+      likedMe: likedMeIds.has(p.id as string),
     })));
 
     return json({
@@ -77,7 +80,7 @@ Deno.serve(async (req) => {
       eventId: session.eventId,
       self: { gender: session.gender, number: session.participantNumber },
       // 0件を可視化しないため件数は返さない（仕様 4-1④）
-      hasLikes: likedByNumbers.size > 0,
+      hasLikes: likedMeIds.size > 0,
       participants: cards,
     });
   } catch (error) {
