@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ApiError, arrive, checkin, getResult, listParticipants, submitVote,
+  ApiError, checkin, getResult, listParticipants, submitVote,
   type ListResult, type ResultPayload,
 } from '../lib/api';
 import { watchPhase } from '../lib/phase';
@@ -56,25 +56,10 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         nickname: res.nickname,
         enabledProfileFields: res.enabledProfileFields,
       });
-      // 番号未確定 = まだ会場到着チェックインが済んでいない。事前入力の案内へ
+      // 番号未確定 = まだ会場でチェックインしていない。事前入力の案内へ
       setStep(res.participantNumber === null ? 'arrive' : 'number');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '受付に失敗しました');
-    } finally {
-      setBusy(false);
-    }
-  }, [sessionToken]);
-
-  const doArrive = useCallback(async () => {
-    if (!sessionToken) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await arrive(sessionToken);
-      setMe((prev) => (prev ? { ...prev, participantNumber: res.participantNumber, nickname: res.nickname } : prev));
-      setStep('number');
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'チェックインに失敗しました');
     } finally {
       setBusy(false);
     }
@@ -181,21 +166,25 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
   if (step === 'arrive') {
     return (
       <main>
-        <h1>受付</h1>
+        <h1>事前受付</h1>
         <div className="card">
-          <p>プロフィールは事前に入力しておくと、当日の受付がスムーズです。</p>
-          <button type="button" onClick={() => setStep('profile')}>
+          <p>プロフィールを先に入力しておくと、当日の受付がスムーズです。</p>
+          <button type="button" className="primary" onClick={() => setStep('profile')}>
             プロフィールを{me.nickname ? '編集する' : '入力する'}
           </button>
         </div>
         <div className="card">
-          <p><strong>会場に到着したら</strong>、下のボタンでチェックインしてください。</p>
-          <p className="muted">まだ受付時間になっていない場合はエラーになります。会場でもう一度お試しください。</p>
+          <h2 style={{ marginTop: 0 }}>当日のチェックイン</h2>
+          <p>
+            会場に到着したら、<strong>会場に掲示されているQRコード</strong>を読み取り、
+            お手元の6桁の受付コードを入力してください。そこで番号が決まります。
+          </p>
+          {/* 出席の確認は会場でしか行えないようにしている。この画面からは登録できない（仕様） */}
+          <p className="muted">
+            このページからはチェックインできません。QRが読み取れない場合は、会場の受付で
+            受付コードをお伝えください。
+          </p>
         </div>
-        {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
-        <button type="button" className="primary" disabled={busy} onClick={doArrive}>
-          {busy ? 'チェックイン中…' : '会場でチェックインする'}
-        </button>
       </main>
     );
   }

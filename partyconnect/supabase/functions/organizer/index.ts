@@ -158,10 +158,12 @@ Deno.serve(async (req) => {
       }
 
       case 'roster': {
-        // 自由記述・投票は返さない。主催者に見せてよいのは番号と状態まで
+        // 自由記述・投票は返さない。主催者に見せてよいのは番号と状態まで。
+        // session_token は事前送付リンク(/join?t=...)を作るために返す。
+        // ★このリンクはプロフィール入力専用で、出席登録の権限は持たない。
         const { data, error } = await db
           .from('participants')
-          .select('id, gender, participant_number, status, nickname, claim_code')
+          .select('id, gender, participant_number, status, nickname, claim_code, session_token')
           .eq('event_id', event.id)
           .order('gender', { ascending: true })
           .order('participant_number', { ascending: true, nullsFirst: false });
@@ -173,6 +175,7 @@ Deno.serve(async (req) => {
             status: p.status,
             nickname: p.nickname,
             claimCode: p.claim_code,
+            sessionToken: p.session_token,
           })),
         });
       }

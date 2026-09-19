@@ -1,19 +1,21 @@
 'use client';
-import { Suspense, use, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { use, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ApiError, checkin } from '../../../lib/api';
 import { saveSessionToken } from '../../../lib/storage';
 
 /**
- * 掲示QR・4桁パスコードから開く受付ページ。
- * 参加者に性別を自己申告させないため、ここでは主催者が渡した6桁の引換コードを入力してもらう。
- * 事前送付の個人QR（?code=）から開いた場合は、コードを自動入力しておく（仕様: 受付混雑の緩和）。
+ * 会場に掲示したQRから開く受付ページ。ここで6桁コードを引き換えると出席登録まで完了する。
+ *
+ * ★このページのURL(checkin_token)は会場の掲示物でしか見られないため、開けたこと自体が
+ *   「会場に来ている」ことの根拠になる。事前送付するリンクにこのURLを含めてはいけない。
+ * ★同じ理由で、コードをURLパラメータから自動入力する仕組みは持たせない。
+ *   自動入力できると、それを事前にメールで送るだけで自宅から出席登録できてしまう。
  */
-function ClaimForm({ checkinToken }: { checkinToken: string }) {
+export default function ClaimPage({ params }: { params: Promise<{ checkinToken: string }> }) {
+  const { checkinToken } = use(params);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const prefilled = (searchParams.get('code') ?? '').replace(/[^0-9]/g, '').slice(0, 6);
-  const [claimCode, setClaimCode] = useState(prefilled);
+  const [claimCode, setClaimCode] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,12 +35,12 @@ function ClaimForm({ checkinToken }: { checkinToken: string }) {
 
   return (
     <main>
-      <h1>受付</h1>
+      <h1>チェックイン</h1>
       <div className="card">
-        <p>受付でお渡しした<strong>6桁の受付コード</strong>を入力してください。</p>
-        {prefilled.length === 6 && (
-          <p className="notice">個人QRからコードを自動入力しました。内容を確認して同意へお進みください。</p>
-        )}
+        <p>
+          お持ちの<strong>6桁の受付コード</strong>を入力してください。
+          お手元にない場合は、会場の受付でお声がけください。
+        </p>
         <label htmlFor="claim">受付コード</label>
         <input
           id="claim"
@@ -70,17 +72,8 @@ function ClaimForm({ checkinToken }: { checkinToken: string }) {
         disabled={busy || claimCode.length !== 6 || !agreed}
         onClick={submit}
       >
-        {busy ? '受付中…' : '受付する'}
+        {busy ? 'チェックイン中…' : 'チェックインする'}
       </button>
     </main>
-  );
-}
-
-export default function ClaimPage({ params }: { params: Promise<{ checkinToken: string }> }) {
-  const { checkinToken } = use(params);
-  return (
-    <Suspense fallback={<main><p className="muted">読み込み中…</p></main>}>
-      <ClaimForm checkinToken={checkinToken} />
-    </Suspense>
   );
 }

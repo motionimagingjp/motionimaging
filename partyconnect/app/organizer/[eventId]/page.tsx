@@ -22,6 +22,8 @@ interface RosterRow {
   status: string;
   nickname: string | null;
   claimCode: string | null;
+  // 事前送付リンク(/join?t=...)用。プロフィール入力専用で、出席登録はできない
+  sessionToken: string | null;
 }
 
 export default function EventConsole({ params }: { params: Promise<{ eventId: string }> }) {
@@ -278,11 +280,19 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         <h2 style={{ marginTop: 0 }}>受付</h2>
         {checkinToken && (
           <>
+            <div className="notice" style={{ marginBottom: 12 }}>
+              <strong>このQRは会場に掲示する専用です。事前にメール等で送らないでください。</strong>
+              <br />
+              会場でしか見られないからこそ「本当に来場した」証明になります。送ってしまうと、
+              来ていない人でも自宅からチェックインできてしまいます。
+            </div>
             <p className="muted" style={{ wordBreak: 'break-all' }}>
               掲示用URL: {origin}/e/{checkinToken}
             </p>
             <QrCode value={`${origin}/e/${checkinToken}`} />
-            <p className="muted">会場の掲示物に印刷して、当日飛び込みの方はここから読み取ってもらえます。</p>
+            <p className="muted">
+              読み取ると受付コードの入力画面が開き、入力した時点でチェックイン（出席登録・番号確定）が完了します。
+            </p>
           </>
         )}
         <label htmlFor="issueCount">まとめて発行する人数</label>
@@ -350,7 +360,10 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>参加者</h2>
-        <p className="muted">受付コードは受付でご本人にお伝えください。</p>
+        <p className="muted">
+          受付コードは、申し込み時に本人へ個別に伝えておくか、当日受付でお伝えください。
+          「事前リンク」はプロフィール入力専用で、そこからチェックインはできません。
+        </p>
         <table>
           <thead>
             <tr><th>性別</th><th>No.</th><th>受付コード</th><th>状態</th><th /><th /></tr>
@@ -365,10 +378,10 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
                   <td>{row.claimCode ?? '—'}</td>
                   <td>{row.status === 'withdrawn' ? '辞退' : row.status === 'active' ? '受付済' : '未受付'}</td>
                   <td>
-                    {row.claimCode && checkinToken && (
+                    {row.sessionToken && (
                       <button type="button" className="inline" disabled={busy}
                         onClick={() => setOpenQrFor(openQrFor === rowKey ? null : rowKey)}>
-                        {openQrFor === rowKey ? '閉じる' : '個人QR'}
+                        {openQrFor === rowKey ? '閉じる' : '事前リンク'}
                       </button>
                     )}
                   </td>
@@ -387,13 +400,19 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         </table>
         {roster.map((row, index) => {
           const rowKey = `${row.gender}-${row.claimCode ?? row.number ?? index}`;
-          if (openQrFor !== rowKey || !row.claimCode || !checkinToken) return null;
+          if (openQrFor !== rowKey || !row.sessionToken) return null;
+          const prefillUrl = `${origin}/join?t=${encodeURIComponent(row.sessionToken)}`;
           return (
             <div key={`qr-${rowKey}`} className="card" style={{ marginTop: 12 }}>
+              <h3 style={{ marginTop: 0 }}>
+                {row.gender === 'male' ? '男性' : '女性'}・受付コード {row.claimCode} の事前リンク
+              </h3>
               <p className="muted">
-                {row.gender === 'male' ? '男' : '女'}・受付コード {row.claimCode} の個人QR（事前にメール等で本人へ送付できます）
+                申し込み時にこのリンク（またはQR）とご本人の受付コードを送ってください。
+                プロフィールを事前に入力してもらえます。<strong>このリンクからチェックインはできません。</strong>
               </p>
-              <QrCode value={`${origin}/e/${checkinToken}?code=${row.claimCode}`} />
+              <p className="muted" style={{ wordBreak: 'break-all' }}>{prefillUrl}</p>
+              <QrCode value={prefillUrl} />
             </div>
           );
         })}

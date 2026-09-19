@@ -67,20 +67,14 @@ export interface CheckinResult {
   enabledProfileFields: string[] | null;
 }
 
-// 受付（セッションを開く・事前入力可能にするだけ）。出席登録はしない
+/**
+ * 受付。
+ *  - checkinToken + claimCode（会場掲示QR経由）: 出席登録・番号採番まで行われる
+ *  - sessionToken（事前送付リンク経由）: セッションを開くだけ。出席登録はされない
+ */
 export const checkin = (body: {
   sessionToken?: string; checkinToken?: string; claimCode?: string; agreed: boolean;
 }) => callFunction<CheckinResult>('checkin', body);
-
-export interface ArriveResult {
-  gender: 'male' | 'female';
-  participantNumber: number;
-  nickname: string | null;
-}
-
-// 会場到着チェックイン（出席登録・番号採番）。受付開始フェーズの間しか成功しない
-export const arrive = (sessionToken: string) =>
-  callFunction<ArriveResult>('arrive', { sessionToken });
 
 export const saveProfile = (body: {
   sessionToken: string; nickname: string; profileData: Record<string, string | string[]>; freeText: string;
