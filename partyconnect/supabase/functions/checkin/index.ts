@@ -1,6 +1,7 @@
 /**
- * チェックイン。引換コードから session_token を得る導線も兼ねる。
- * 番号の採番は checkin_participant RPC がトランザクション内で行う（仕様 6-4）。
+ * 受付（セッションを開くだけ）。引換コードから session_token を得る導線も兼ねる。
+ * ★ここでは番号を採番しない・出席登録もしない。事前にプロフィールだけ入力できるようにするため。
+ *   会場到着時の出席登録（番号採番）は `arrive` Edge Function（checkin_participant RPC）が行う。
  */
 import { serviceClient } from '../_shared/supabase.ts';
 import { AppError, json, preflight, readJson, toErrorResponse } from '../_shared/http.ts';
@@ -37,7 +38,7 @@ Deno.serve(async (req) => {
       sessionToken = (data as { session_token: string }).session_token;
     }
 
-    // 規約・プライバシーポリシーへの同意はチェックイン時に必須（仕様 11-2）
+    // 規約・プライバシーポリシーへの同意は受付時に必須（仕様 11-2）
     if (body.agreed !== true) {
       throw new AppError('利用規約とプライバシーポリシーへの同意が必要です');
     }
@@ -45,11 +46,14 @@ Deno.serve(async (req) => {
       throw new AppError('操作が多すぎます。少し待ってからお試しください', 429);
     }
 
-    const { data, error } = await db.rpc('checkin_participant', { p_session_token: sessionToken });
-    if (error) throw error;
-    const p = data as {
-      event_id: string; gender: string; participant_number: number; nickname: string | null;
-    };
+    const { data: p, error: pError } = await db
+      .from('participants')
+      .select('event_id, gender, participant_number, nickname, status')
+      .eq('session_token', sessionToken)
+      .maybeSingle();
+    if (pError) throw pError;
+    if (!p) throw new AppError('セッションが見つかりません。主催者にお声がけください', 401);
+    if (p.status === 'withdrawn') throw new AppError('受付が取り消されています', 403);
 
     const { data: event, error: eventError } = await db
       .from('events').select('profile_field_keys').eq('id', p.event_id).single();

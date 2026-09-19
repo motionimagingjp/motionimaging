@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ApiError, checkin, getResult, listParticipants, submitVote,
+  ApiError, arrive, checkin, getResult, listParticipants, submitVote,
   type ListResult, type ResultPayload,
 } from '../lib/api';
 import { watchPhase } from '../lib/phase';
@@ -13,7 +13,8 @@ import ResultScreen from './ResultScreen';
 interface Me {
   eventId: string;
   gender: 'male' | 'female';
-  participantNumber: number;
+  // null = まだ会場到着チェックインが済んでいない（事前入力のみ）
+  participantNumber: number | null;
   nickname: string | null;
   enabledProfileFields: string[] | null;
 }
@@ -24,7 +25,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [phase, setPhase] = useState<string>('checkin');
-  const [step, setStep] = useState<'checkin' | 'number' | 'profile' | 'event'>('checkin');
+  const [step, setStep] = useState<'checkin' | 'arrive' | 'number' | 'profile' | 'event'>('checkin');
   const [agreed, setAgreed] = useState(false);
   const [list, setList] = useState<ListResult | null>(null);
   const [result, setResult] = useState<ResultPayload | null>(null);
@@ -55,9 +56,25 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         nickname: res.nickname,
         enabledProfileFields: res.enabledProfileFields,
       });
-      setStep('number');
+      // 番号未確定 = まだ会場到着チェックインが済んでいない。事前入力の案内へ
+      setStep(res.participantNumber === null ? 'arrive' : 'number');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '受付に失敗しました');
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionToken]);
+
+  const doArrive = useCallback(async () => {
+    if (!sessionToken) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await arrive(sessionToken);
+      setMe((prev) => (prev ? { ...prev, participantNumber: res.participantNumber, nickname: res.nickname } : prev));
+      setStep('number');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'チェックインに失敗しました');
     } finally {
       setBusy(false);
     }
@@ -161,6 +178,28 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
     );
   }
 
+  if (step === 'arrive') {
+    return (
+      <main>
+        <h1>受付</h1>
+        <div className="card">
+          <p>プロフィールは事前に入力しておくと、当日の受付がスムーズです。</p>
+          <button type="button" onClick={() => setStep('profile')}>
+            プロフィールを{me.nickname ? '編集する' : '入力する'}
+          </button>
+        </div>
+        <div className="card">
+          <p><strong>会場に到着したら</strong>、下のボタンでチェックインしてください。</p>
+          <p className="muted">まだ受付時間になっていない場合はエラーになります。会場でもう一度お試しください。</p>
+        </div>
+        {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
+        <button type="button" className="primary" disabled={busy} onClick={doArrive}>
+          {busy ? 'チェックイン中…' : '会場でチェックインする'}
+        </button>
+      </main>
+    );
+  }
+
   if (step === 'number') {
     return (
       <main>
@@ -185,7 +224,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
           sessionToken={sessionToken}
           initial={{ nickname: me.nickname }}
           enabledFields={me.enabledProfileFields}
-          onSaved={() => setStep('event')}
+          onSaved={() => setStep(me.participantNumber === null ? 'arrive' : 'event')}
         />
       </main>
     );

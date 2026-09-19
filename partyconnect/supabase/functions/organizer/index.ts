@@ -1,24 +1,28 @@
 /**
  * 主催者向け操作。
- *   progress     進捗カウンタ（集計値のみ。個々の投票内容は返さない）
- *   issue_slots  参加者枠と引換コードの発行（事前配布URL・当日の代理登録の両方）
- *   roster       参加者の一覧（番号・状態・引換コードのみ。自由記述と投票は返さない）
- *   withdraw     辞退の設定・解除
- *   pairs        成立ペアの番号一覧（会場での発表・呼び出しに使う）
- *   demo_seed    デモモード用のダミー参加者20名を投入する
+ *   progress        進捗カウンタ（集計値のみ。個々の投票内容は返さない）
+ *   issue_slots     参加者枠と引換コードの発行（事前配布URL・当日の代理登録の両方）
+ *   roster          参加者の一覧（番号・状態・引換コードのみ。自由記述と投票は返さない）
+ *   withdraw        辞退の設定・解除
+ *   pairs           成立ペアの番号一覧（会場での発表・呼び出しに使う）
+ *   demo_seed       デモモード用のダミー参加者20名を投入する
+ *   checkin_by_code 主催者が引換コードを聞き取って代わりに会場到着チェックインさせる（スマホ操作が難しい人向け）
  */
 import { requireOrganizer, serviceClient } from '../_shared/supabase.ts';
 import { AppError, json, preflight, readJson, toErrorResponse } from '../_shared/http.ts';
 import { computeMatching } from '../_shared/matching.ts';
 
 interface Body {
-  action: 'progress' | 'issue_slots' | 'roster' | 'withdraw' | 'pairs' | 'demo_seed' | 'preview_result';
+  action:
+    | 'progress' | 'issue_slots' | 'roster' | 'withdraw' | 'pairs' | 'demo_seed' | 'preview_result'
+    | 'checkin_by_code';
   eventId: string;
   gender?: 'male' | 'female';
   count?: number;
   isProxy?: boolean;
   participantNumber?: number;
   withdrawn?: boolean;
+  claimCode?: string;
 }
 
 function newSessionToken(): string {
@@ -114,6 +118,23 @@ Deno.serve(async (req) => {
           matchedPairsCount: matching.pairs.length,
           oneSidedPairsCount: matching.oneSidedPairsCount,
         });
+      }
+
+      case 'checkin_by_code': {
+        if (!body.claimCode) throw new AppError('受付コードを入力してください');
+        const { data: target, error: targetError } = await db
+          .from('participants').select('session_token')
+          .eq('event_id', event.id).eq('claim_code', body.claimCode).neq('status', 'withdrawn')
+          .maybeSingle();
+        if (targetError) throw targetError;
+        if (!target) throw new AppError('コードが見つかりません');
+
+        const { data, error } = await db.rpc('checkin_participant', {
+          p_session_token: target.session_token,
+        });
+        if (error) throw error;
+        const p = data as { gender: string; participant_number: number };
+        return json({ gender: p.gender, participantNumber: p.participant_number });
       }
 
       case 'issue_slots': {

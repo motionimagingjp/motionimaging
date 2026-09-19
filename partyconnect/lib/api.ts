@@ -60,15 +60,27 @@ export async function callFunction<T>(
 export interface CheckinResult {
   sessionToken: string;
   gender: 'male' | 'female';
-  participantNumber: number;
+  // null = まだ会場到着チェックインが済んでいない（事前入力のみの状態）
+  participantNumber: number | null;
   nickname: string | null;
   // null = 全項目使用。イベントごとに主催者が使う項目だけを絞り込める
   enabledProfileFields: string[] | null;
 }
 
+// 受付（セッションを開く・事前入力可能にするだけ）。出席登録はしない
 export const checkin = (body: {
   sessionToken?: string; checkinToken?: string; claimCode?: string; agreed: boolean;
 }) => callFunction<CheckinResult>('checkin', body);
+
+export interface ArriveResult {
+  gender: 'male' | 'female';
+  participantNumber: number;
+  nickname: string | null;
+}
+
+// 会場到着チェックイン（出席登録・番号採番）。受付開始フェーズの間しか成功しない
+export const arrive = (sessionToken: string) =>
+  callFunction<ArriveResult>('arrive', { sessionToken });
 
 export const saveProfile = (body: {
   sessionToken: string; nickname: string; profileData: Record<string, string | string[]>; freeText: string;

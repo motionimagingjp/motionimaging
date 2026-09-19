@@ -6,7 +6,7 @@
  */
 import { serviceClient } from '../_shared/supabase.ts';
 import { AppError, json, preflight, readJson, toErrorResponse } from '../_shared/http.ts';
-import { assertCheckedIn, requireParticipant } from '../_shared/session.ts';
+import { requireParticipant } from '../_shared/session.ts';
 import { checkRateLimit } from '../_shared/rate-limit.ts';
 
 interface Body { sessionToken: string }
@@ -18,8 +18,8 @@ Deno.serve(async (req) => {
   try {
     const body = await readJson<Body>(req);
     const db = serviceClient();
+    // 事前入力（会場到着前）でも写真を登録できるよう、出席登録済みかどうかは問わない
     const session = await requireParticipant(db, body.sessionToken);
-    assertCheckedIn(session);
     if (!checkRateLimit(`photo:${body.sessionToken}`, 10)) {
       throw new AppError('操作が多すぎます。少し待ってからお試しください', 429);
     }

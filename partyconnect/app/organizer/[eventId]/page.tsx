@@ -43,6 +43,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const [now, setNow] = useState(() => Date.now());
   const [issueCount, setIssueCount] = useState(1);
   const [openQrFor, setOpenQrFor] = useState<string | null>(null);
+  const [manualCode, setManualCode] = useState('');
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -124,6 +125,15 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const issue = (gender: 'male' | 'female') => run(async () => {
     if (!token) return;
     await organizerCall({ action: 'issue_slots', eventId, gender, count: issueCount, isProxy: true }, token);
+  });
+
+  const checkinByCode = () => run(async () => {
+    if (!token || manualCode.length !== 6) return;
+    const res = await organizerCall<{ gender: 'male' | 'female'; participantNumber: number }>(
+      { action: 'checkin_by_code', eventId, claimCode: manualCode }, token,
+    );
+    setManualCode('');
+    setMessage(`${res.gender === 'male' ? '男性' : '女性'} No.${res.participantNumber} をチェックインしました`);
   });
 
   const withdraw = (row: RosterRow, withdrawn: boolean) => run(async () => {
@@ -297,6 +307,26 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
             </button>
           )}
         </div>
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>会場到着チェックイン（代理）</h2>
+        <p className="muted">
+          プロフィールは事前入力済みでも、会場到着チェックインは別操作です（①受付開始が必要）。
+          参加者本人のスマホ操作が難しい場合、6桁の受付コードを聞き取って代わりにチェックインできます。
+        </p>
+        <label htmlFor="manualCode">受付コード</label>
+        <input
+          id="manualCode"
+          inputMode="numeric"
+          maxLength={6}
+          value={manualCode}
+          onChange={(e) => setManualCode(e.target.value.replace(/[^0-9]/g, ''))}
+        />
+        <button type="button" className="primary" style={{ marginTop: 8 }}
+          disabled={busy || manualCode.length !== 6} onClick={checkinByCode}>
+          このコードでチェックインさせる
+        </button>
       </div>
 
       <div className="card">
