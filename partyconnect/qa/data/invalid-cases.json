@@ -1,0 +1,63 @@
+[
+  {
+    "caseId": "INVALID-1",
+    "title": "同性への投票を試みる（性別改ざん試行）",
+    "note": "この実装ではリクエストに性別を含める余地が無く、送信者(sessionToken)の性別から相手の性別をサーバー側で強制決定する。そのため『同性の番号を指定する』リクエスト自体を素直には構成できない。ここでは実際の攻撃形（クライアントが gender を偽って上書きしようとする）を送り、無視されることを検証する。同性投票が成立しないことの回帰テストとして扱うこと。",
+    "phaseRequired": "like_vote",
+    "request": {
+      "endpoint": "/functions/v1/submit_vote",
+      "method": "POST",
+      "headers": { "apikey": "<SUPABASE_ANON_KEY>", "Content-Type": "application/json" },
+      "body": {
+        "sessionToken": "<M1のsessionToken>",
+        "voteType": "like",
+        "targetNumbers": [2],
+        "gender": "male"
+      }
+    },
+    "expected": {
+      "httpStatus": 200,
+      "assertion": "サーバーは body.gender を一切読まない。M1(男性)からの送信は必ず女性側テーブルを参照するため、実際に登録されるのは女性2番(W2)への好印象であり、男性2番(M2)への投票にはならない。もしこれが失敗する（男性2番に届く、あるいは同性投票が成立する）場合は重大なセキュリティ回帰。"
+    }
+  },
+  {
+    "caseId": "INVALID-2",
+    "title": "最終希望で4人以上を選択して送信する",
+    "note": "最終希望(final)は第3希望までの仕様。4件以上は保存前にサーバー側で拒否されなければならない。",
+    "phaseRequired": "final_vote",
+    "request": {
+      "endpoint": "/functions/v1/submit_vote",
+      "method": "POST",
+      "headers": { "apikey": "<SUPABASE_ANON_KEY>", "Content-Type": "application/json" },
+      "body": {
+        "sessionToken": "<M1のsessionToken>",
+        "voteType": "final",
+        "targetNumbers": [1, 2, 3, 4]
+      }
+    },
+    "expected": {
+      "httpStatus": 400,
+      "errorContains": "最終希望は第3希望までです"
+    }
+  },
+  {
+    "caseId": "INVALID-3",
+    "title": "存在しない番号（範囲外）に送信する",
+    "note": "参加者は男女とも1〜10番までしか発行していない。範囲外の番号は『存在しないユーザー』相当として拒否されること。",
+    "phaseRequired": "like_vote",
+    "request": {
+      "endpoint": "/functions/v1/submit_vote",
+      "method": "POST",
+      "headers": { "apikey": "<SUPABASE_ANON_KEY>", "Content-Type": "application/json" },
+      "body": {
+        "sessionToken": "<M1のsessionToken>",
+        "voteType": "like",
+        "targetNumbers": [99]
+      }
+    },
+    "expected": {
+      "httpStatus": 400,
+      "errorContains": "99番の方は選択できません"
+    }
+  }
+]

@@ -1,0 +1,23 @@
+[
+  { "id": "M1",  "gender": "male",   "number": 1,  "voteFor": ["W2", "W1", "W9"],  "targetNumbers": [2, 1, 9] },
+  { "id": "M2",  "gender": "male",   "number": 2,  "voteFor": ["W2", "W9", "W10"], "targetNumbers": [2, 9, 10] },
+  { "id": "M3",  "gender": "male",   "number": 3,  "voteFor": ["W3", "W9", "W10"], "targetNumbers": [3, 9, 10] },
+  { "id": "M4",  "gender": "male",   "number": 4,  "voteFor": ["W4", "W9", "W10"], "targetNumbers": [4, 9, 10] },
+  { "id": "M5",  "gender": "male",   "number": 5,  "voteFor": ["W5", "W9", "W10"], "targetNumbers": [5, 9, 10] },
+  { "id": "M6",  "gender": "male",   "number": 6,  "voteFor": ["W6", "W9", "W10"], "targetNumbers": [6, 9, 10] },
+  { "id": "M7",  "gender": "male",   "number": 7,  "voteFor": ["W7", "W9", "W10"], "targetNumbers": [7, 9, 10] },
+  { "id": "M8",  "gender": "male",   "number": 8,  "voteFor": ["W8", "W9", "W10"], "targetNumbers": [8, 9, 10] },
+  { "id": "M9",  "gender": "male",   "number": 9,  "voteFor": ["W1", "W2", "W3"],  "targetNumbers": [1, 2, 3] },
+  { "id": "M10", "gender": "male",   "number": 10, "voteFor": ["W4", "W5", "W6"],  "targetNumbers": [4, 5, 6] },
+
+  { "id": "W1",  "gender": "female", "number": 1,  "voteFor": ["M1", "M9", "M10"], "targetNumbers": [1, 9, 10] },
+  { "id": "W2",  "gender": "female", "number": 2,  "voteFor": ["M1", "M2", "M9"],  "targetNumbers": [1, 2, 9] },
+  { "id": "W3",  "gender": "female", "number": 3,  "voteFor": ["M3", "M9", "M10"], "targetNumbers": [3, 9, 10] },
+  { "id": "W4",  "gender": "female", "number": 4,  "voteFor": ["M4", "M9", "M10"], "targetNumbers": [4, 9, 10] },
+  { "id": "W5",  "gender": "female", "number": 5,  "voteFor": ["M5", "M9", "M10"], "targetNumbers": [5, 9, 10] },
+  { "id": "W6",  "gender": "female", "number": 6,  "voteFor": ["M6", "M9", "M10"], "targetNumbers": [6, 9, 10] },
+  { "id": "W7",  "gender": "female", "number": 7,  "voteFor": ["M7", "M9", "M10"], "targetNumbers": [7, 9, 10] },
+  { "id": "W8",  "gender": "female", "number": 8,  "voteFor": ["M8", "M9", "M10"], "targetNumbers": [8, 9, 10] },
+  { "id": "W9",  "gender": "female", "number": 9,  "voteFor": ["M1", "M2", "M3"],  "targetNumbers": [1, 2, 3] },
+  { "id": "W10", "gender": "female", "number": 10, "voteFor": ["M4", "M5", "M6"],  "targetNumbers": [4, 5, 6] }
+]

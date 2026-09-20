@@ -1,0 +1,23 @@
+[
+  { "id": "M1",  "gender": "male",   "number": 1,  "targetNumbers": [1, 2, 9] },
+  { "id": "M2",  "gender": "male",   "number": 2,  "targetNumbers": [2, 3, 9, 10] },
+  { "id": "M3",  "gender": "male",   "number": 3,  "targetNumbers": [1, 3, 5, 9, 10] },
+  { "id": "M4",  "gender": "male",   "number": 4,  "targetNumbers": [4, 6, 9, 10] },
+  { "id": "M5",  "gender": "male",   "number": 5,  "targetNumbers": [1, 2, 5, 7, 9, 10] },
+  { "id": "M6",  "gender": "male",   "number": 6,  "targetNumbers": [3, 6, 9, 10] },
+  { "id": "M7",  "gender": "male",   "number": 7,  "targetNumbers": [1, 2, 4, 6, 7, 9, 10] },
+  { "id": "M8",  "gender": "male",   "number": 8,  "targetNumbers": [5, 8, 9, 10] },
+  { "id": "M9",  "gender": "male",   "number": 9,  "targetNumbers": [1, 2, 3, 4, 5, 6, 7, 8] },
+  { "id": "M10", "gender": "male",   "number": 10, "targetNumbers": [4, 5, 6, 9, 10] },
+
+  { "id": "W1",  "gender": "female", "number": 1,  "targetNumbers": [1, 9, 10] },
+  { "id": "W2",  "gender": "female", "number": 2,  "targetNumbers": [1, 2, 9] },
+  { "id": "W3",  "gender": "female", "number": 3,  "targetNumbers": [1, 3, 9, 10] },
+  { "id": "W4",  "gender": "female", "number": 4,  "targetNumbers": [2, 4, 9, 10] },
+  { "id": "W5",  "gender": "female", "number": 5,  "targetNumbers": [3, 5, 6, 9, 10] },
+  { "id": "W6",  "gender": "female", "number": 6,  "targetNumbers": [6, 9, 10] },
+  { "id": "W7",  "gender": "female", "number": 7,  "targetNumbers": [1, 2, 3, 7, 8, 9, 10] },
+  { "id": "W8",  "gender": "female", "number": 8,  "targetNumbers": [4, 8, 9, 10] },
+  { "id": "W9",  "gender": "female", "number": 9,  "targetNumbers": [1, 2, 3, 4, 5, 6, 7, 8] },
+  { "id": "W10", "gender": "female", "number": 10, "targetNumbers": [4, 5, 6, 7, 8, 9] }
+]
