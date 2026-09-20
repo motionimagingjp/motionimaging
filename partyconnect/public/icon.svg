@@ -1,36 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
   <rect width="192" height="192" rx="42" fill="#ffffff"/>
   <rect x="1.5" y="1.5" width="189" height="189" rx="41" fill="none" stroke="#eef3f2" stroke-width="3"/>
 
-  <g transform="translate(96,90) scale(0.9) translate(-96,-96)">
-    <!-- left hand -->
-    <g transform="translate(84,168) rotate(-50)">
-      <rect x="-17" y="-8"  width="34" height="42" rx="15" fill="#ffe1bd" stroke="#2b2420" stroke-width="4.5"/>
-      <rect x="-22" y="-42" width="44" height="36" rx="16" fill="#ffe1bd" stroke="#2b2420" stroke-width="4.5"/>
-      <rect x="-20" y="-68" width="10" height="32" rx="5" fill="#ffe1bd" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="-8"  y="-76" width="10" height="40" rx="5" fill="#ffe1bd" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="4"   y="-74" width="10" height="38" rx="5" fill="#ffe1bd" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="16"  y="-63" width="10" height="27" rx="5" fill="#ffe1bd" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="1"   y="6"   width="32" height="16" rx="8" fill="#ffe1bd" stroke="#2b2420" stroke-width="3.8" transform="rotate(46 5 14)"/>
-    </g>
-
-    <!-- right hand -->
-    <g transform="translate(108,168) rotate(50)">
-      <rect x="-17" y="-8"  width="34" height="42" rx="15" fill="#ffd7a8" stroke="#2b2420" stroke-width="4.5"/>
-      <rect x="-22" y="-42" width="44" height="36" rx="16" fill="#ffd7a8" stroke="#2b2420" stroke-width="4.5"/>
-      <rect x="10"  y="-68" width="10" height="32" rx="5" fill="#ffd7a8" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="-2"  y="-76" width="10" height="40" rx="5" fill="#ffd7a8" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="-14" y="-74" width="10" height="38" rx="5" fill="#ffd7a8" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="-26" y="-63" width="10" height="27" rx="5" fill="#ffd7a8" stroke="#2b2420" stroke-width="3.8"/>
-      <rect x="-33" y="6"   width="32" height="16" rx="8" fill="#ffd7a8" stroke="#2b2420" stroke-width="3.8" transform="rotate(-46 -17 14)"/>
-    </g>
-  </g>
-
-  <!-- heart accent (fresh mint/teal) -->
-  <g transform="translate(96,52)">
-    <path d="M0 13 C-15 3 -15 -13 -3 -15 C2 -16 0 -9 0 -9 C0 -9 -2 -16 3 -15 C15 -13 15 3 0 13 Z"
-          fill="#33c9b0" stroke="#2b2420" stroke-width="3.5" stroke-linejoin="round"/>
-    <path d="M-25 -5 L-33 -9 M-26 7 L-35 8 M25 -5 L33 -9 M26 7 L35 8"
-          stroke="#33c9b0" stroke-width="3.5" stroke-linecap="round"/>
+  <g transform="translate(96,96)">
+    <path d="M0 34 C-38 8 -38 -32 -10 -38 C4 -41 0 -24 0 -24 C0 -24 -4 -41 10 -38 C38 -32 38 8 0 34 Z"
+          fill="#2fbf71" stroke="#0f1020" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M-58 -14 L-74 -22 M-60 16 L-76 18 M58 -14 L74 -22 M60 16 L76 18 M-6 -56 L-10 -74 M6 -56 L10 -74"
+          stroke="#2fbf71" stroke-width="6" stroke-linecap="round"/>
   </g>
 </svg>
