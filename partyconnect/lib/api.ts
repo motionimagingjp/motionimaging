@@ -152,7 +152,10 @@ export interface Progress {
 
 export interface PairNumbers { male: number | null; female: number | null }
 
+export type MatchingMode = 'max_pairs' | 'greedy_priority';
+
 export interface PreviewResult {
+  matchingMode: MatchingMode;
   matchedPairsCount: number;
   oneSidedPairsCount: number;
   pairs: PairNumbers[];

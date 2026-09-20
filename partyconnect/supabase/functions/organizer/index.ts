@@ -10,7 +10,7 @@
  */
 import { requireOrganizer, serviceClient } from '../_shared/supabase.ts';
 import { AppError, json, preflight, readJson, toErrorResponse } from '../_shared/http.ts';
-import { computeMatching } from '../_shared/matching.ts';
+import { runMatching } from '../_shared/matching.ts';
 
 interface Body {
   action:
@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
     const db = serviceClient();
 
     const { data: event, error: eventError } = await db
-      .from('events').select('id, organizer_id, is_demo, seed_value').eq('id', body.eventId).single();
+      .from('events').select('id, organizer_id, is_demo, seed_value, matching_mode').eq('id', body.eventId).single();
     if (eventError) throw eventError;
     if (event.organizer_id !== organizerId) throw new AppError('権限がありません', 403);
 
@@ -90,7 +90,8 @@ Deno.serve(async (req) => {
       case 'preview_result': {
         // 配信前の内輪確認用。DBには何も書き込まない（確定は finalize_event のみが行う）
         const { data: participants, error: pError } = await db
-          .from('participants').select('id, gender, status, participant_number').eq('event_id', event.id);
+          .from('participants')
+          .select('id, gender, status, participant_number, checked_in_at').eq('event_id', event.id);
         if (pError) throw pError;
         const active = participants.filter((p) => p.status === 'active');
         const activeIds = new Set(active.map((p) => p.id as string));
@@ -107,11 +108,15 @@ Deno.serve(async (req) => {
             from: v.from_participant_id, to: v.to_participant_id, order: v.preference_order as number,
           }));
 
-        const matching = computeMatching({
+        // ★finalize_event と必ず同じ runMatching を経由する（結果の食い違いを防ぐため）
+        const matching = runMatching(event.matching_mode, {
           maleIds: active.filter((p) => p.gender === 'male').map((p) => p.id as string),
           femaleIds: active.filter((p) => p.gender === 'female').map((p) => p.id as string),
           nominations,
           seed: event.seed_value,
+          checkedInAt: Object.fromEntries(
+            active.map((p) => [p.id as string, p.checked_in_at as string]),
+          ),
         });
 
         // 配信前に「誰と誰が成立するか」を番号で確認できるようにする。
@@ -120,6 +125,7 @@ Deno.serve(async (req) => {
           participants.map((p) => [p.id as string, p.participant_number as number | null]),
         );
         return json({
+          matchingMode: event.matching_mode,
           matchedPairsCount: matching.pairs.length,
           oneSidedPairsCount: matching.oneSidedPairsCount,
           pairs: matching.pairs

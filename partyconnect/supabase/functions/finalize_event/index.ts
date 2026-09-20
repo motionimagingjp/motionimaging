@@ -5,7 +5,7 @@
  */
 import { requireOrganizer, serviceClient } from '../_shared/supabase.ts';
 import { AppError, json, preflight, readJson, toErrorResponse } from '../_shared/http.ts';
-import { computeMatching, type Nomination } from '../_shared/matching.ts';
+import { runMatching, type Nomination } from '../_shared/matching.ts';
 import { buildAnalytics, type ParticipantForStats } from '../_shared/analytics.ts';
 
 interface Body { eventId: string }
@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
     const db = serviceClient();
 
     const { data: event, error: eventError } = await db
-      .from('events').select('id, organizer_id, seed_value, status, started_at')
+      .from('events').select('id, organizer_id, seed_value, status, started_at, matching_mode')
       .eq('id', body.eventId).single();
     if (eventError) throw eventError;
     if (event.organizer_id !== organizerId) throw new AppError('権限がありません', 403);
@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
 
     const { data: participants, error: pError } = await db
       .from('participants')
-      .select('id, gender, status, profile_data')
+      .select('id, gender, status, profile_data, checked_in_at')
       .eq('event_id', event.id);
     if (pError) throw pError;
 
@@ -51,11 +51,16 @@ Deno.serve(async (req) => {
         order: v.preference_order as number,
       }));
 
-    const matching = computeMatching({
+    // ★方式の分岐は runMatching に集約している。ここで独自に分岐を書かないこと
+    //   （organizer/preview_result と結果がずれる事故を防ぐため）。
+    const matching = runMatching(event.matching_mode, {
       maleIds: active.filter((p) => p.gender === 'male').map((p) => p.id as string),
       femaleIds: active.filter((p) => p.gender === 'female').map((p) => p.id as string),
       nominations,
       seed: event.seed_value,
+      checkedInAt: Object.fromEntries(
+        active.map((p) => [p.id as string, p.checked_in_at as string]),
+      ),
     });
 
     const statsInput: ParticipantForStats[] = participants.map((p) => ({

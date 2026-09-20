@@ -221,3 +221,126 @@ export function computeMatching(input: MatchingInput): MatchingResult {
 
   return { pairs, oneSidedPairsCount };
 }
+
+// =============================================================================
+// オプション方式: 上位優先（第1希望優先）マッチング
+//
+// computeMatching（既定・推奨）が「成立組数の最大化」を最優先するのに対し、
+// こちらは「相互の熱量（スコア）が高いペアを最優先」する貪欲法。
+// あぶれる人が増える可能性があることを理解した主催者だけが選ぶオプション。
+//
+// ★computeMatching の実装には一切手を入れていない（1行も変更していない）。
+//   相互指名エッジの抽出ロジックは似ているが、既存の検証済みアルゴリズムに
+//   リスクを持ち込まないため、あえて重複を許容してこちらに独立実装する。
+// =============================================================================
+
+export interface GreedyMatchingInput {
+  maleIds: string[];
+  femaleIds: string[];
+  nominations: Nomination[];
+  /**
+   * 参加者ID -> チェックイン時刻。同スコアの相互指名が複数ある場合のタイブレークにのみ使う
+   * （どちらを先に確定させるか）。値は Date.parse できる文字列、またはepoch ms。
+   * 主催者向けの説明: 「同点なら登録（チェックイン）が早かった人を優先する」。
+   */
+  checkedInAt: Record<string, string | number>;
+}
+
+function toEpochMs(value: string | number | undefined): number {
+  if (value === undefined) return Number.POSITIVE_INFINITY; // 不明な人は最後に回す
+  const t = typeof value === 'number' ? value : Date.parse(value);
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+}
+
+export function computeGreedyMatching(input: GreedyMatchingInput): MatchingResult {
+  const maleSet = new Set(input.maleIds);
+  const femaleSet = new Set(input.femaleIds);
+
+  // 1) 有効な指名だけを点数表に落とす（computeMatchingと同じ規則。異性間・順位1〜3のみ）
+  const points = new Map<string, Map<string, number>>();
+  for (const nom of input.nominations) {
+    const pts = PREFERENCE_POINTS[nom.order];
+    if (pts === undefined) continue;
+    const crossGender =
+      (maleSet.has(nom.from) && femaleSet.has(nom.to)) ||
+      (femaleSet.has(nom.from) && maleSet.has(nom.to));
+    if (!crossGender) continue;
+
+    let row = points.get(nom.from);
+    if (!row) { row = new Map(); points.set(nom.from, row); }
+    const prev = row.get(nom.to);
+    if (prev === undefined || pts > prev) row.set(nom.to, pts);
+  }
+
+  // 2) 相互指名のみを候補エッジにする。片側指名は数だけ数える（computeMatchingと同じ集計）
+  interface GreedyEdge { maleId: string; femaleId: string; score: number; tiebreakMs: number }
+  const edges: GreedyEdge[] = [];
+  let oneSidedPairsCount = 0;
+  for (const maleId of input.maleIds) {
+    const row = points.get(maleId);
+    if (!row) continue;
+    for (const [femaleId, malePts] of row) {
+      const femalePts = points.get(femaleId)?.get(maleId);
+      if (femalePts === undefined) { oneSidedPairsCount++; continue; }
+      const tiebreakMs = Math.min(
+        toEpochMs(input.checkedInAt[maleId]),
+        toEpochMs(input.checkedInAt[femaleId]),
+      );
+      edges.push({ maleId, femaleId, score: malePts + femalePts, tiebreakMs });
+    }
+  }
+  for (const femaleId of input.femaleIds) {
+    const row = points.get(femaleId);
+    if (!row) continue;
+    for (const maleId of row.keys()) {
+      if (points.get(maleId)?.get(femaleId) === undefined) oneSidedPairsCount++;
+    }
+  }
+
+  // 3) スコア降順 → タイブレーク（チェックインが早い方を優先）→ ID順（最終フォールバック）で
+  //    完全に決定的な順序にしてから、早い者勝ちで確定させていく。
+  //    ★同点処理の順序を曖昧にすると「同じデータで再集計したら結果が変わる」という
+  //      致命的な不具合になるため、必ずこの3段階で一意に順序が決まるようにしている。
+  edges.sort((a, b) => (
+    b.score - a.score
+    || a.tiebreakMs - b.tiebreakMs
+    || (a.maleId < b.maleId ? -1 : a.maleId > b.maleId ? 1 : 0)
+    || (a.femaleId < b.femaleId ? -1 : a.femaleId > b.femaleId ? 1 : 0)
+  ));
+
+  const usedMale = new Set<string>();
+  const usedFemale = new Set<string>();
+  const pairs: MatchedPair[] = [];
+  for (const e of edges) {
+    if (usedMale.has(e.maleId) || usedFemale.has(e.femaleId)) continue;
+    usedMale.add(e.maleId);
+    usedFemale.add(e.femaleId);
+    pairs.push({ maleId: e.maleId, femaleId: e.femaleId, score: e.score });
+  }
+
+  pairs.sort((x, y) => (x.maleId < y.maleId ? -1 : x.maleId > y.maleId ? 1 : 0));
+  return { pairs, oneSidedPairsCount };
+}
+
+/**
+ * どちらの方式で計算するかを1箇所に集約する。
+ * ★finalize_event（確定配信）と organizer/preview_result（配信前プレビュー）の
+ *   両方が必ずこの関数だけを経由すること。呼び出し側でそれぞれ分岐を書くと、
+ *   「プレビューで見た結果と本番配信の結果が食い違う」という重大な不整合を招く。
+ */
+export type MatchingMode = 'max_pairs' | 'greedy_priority';
+
+export function runMatching(
+  mode: MatchingMode,
+  input: MatchingInput & { checkedInAt: Record<string, string | number> },
+): MatchingResult {
+  if (mode === 'greedy_priority') {
+    return computeGreedyMatching({
+      maleIds: input.maleIds,
+      femaleIds: input.femaleIds,
+      nominations: input.nominations,
+      checkedInAt: input.checkedInAt,
+    });
+  }
+  return computeMatching(input);
+}

@@ -42,6 +42,7 @@ export default function OrganizerHome() {
   const [eventDate, setEventDate] = useState(defaultEventDate);
   const [eventTime, setEventTime] = useState('13:00');
   const [checkinTime, setCheckinTime] = useState('12:45');
+  const [matchingMode, setMatchingMode] = useState<'max_pairs' | 'greedy_priority'>('max_pairs');
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -97,9 +98,12 @@ export default function OrganizerHome() {
         p_is_demo: isDemo,
         p_event_time: isDemo ? null : eventTime,
         p_checkin_time: isDemo ? null : checkinTime,
+        // デモは常にmax_pairs固定（サーバー側でも強制している）。ここでは通常イベントの選択を渡す
+        p_matching_mode: matchingMode,
       });
       if (error) throw error;
       setEventName('');
+      setMatchingMode('max_pairs');
       await loadEvents();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '作成に失敗しました');
@@ -144,6 +148,29 @@ export default function OrganizerHome() {
         <input id="eventTime" type="time" value={eventTime} onChange={(e) => onEventTimeChange(e.target.value)} />
         <label htmlFor="checkinTime">受付開始時刻</label>
         <input id="checkinTime" type="time" value={checkinTime} onChange={(e) => setCheckinTime(e.target.value)} />
+
+        <label>マッチング方式</label>
+        <div className="tabs">
+          <button type="button" aria-pressed={matchingMode === 'max_pairs'}
+            onClick={() => setMatchingMode('max_pairs')}>
+            最大組数（推奨）
+          </button>
+          <button type="button" aria-pressed={matchingMode === 'greedy_priority'}
+            onClick={() => setMatchingMode('greedy_priority')}>
+            第1希望優先
+          </button>
+        </div>
+        {matchingMode === 'greedy_priority' ? (
+          <p className="muted" style={{ marginTop: -4 }}>
+            相思相愛の熱量が強いペアを優先して成立させます。<strong>全体の成立組数は
+            「最大組数」より少なくなることがあります。</strong>迷ったら「最大組数」を選んでください。
+          </p>
+        ) : (
+          <p className="muted" style={{ marginTop: -4 }}>
+            会場全体で成立するカップル数が最も多くなるよう自動計算します（通常はこちらで問題ありません）。
+          </p>
+        )}
+
         <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
           <button type="button" className="primary" disabled={busy || !eventName || !phone}
             onClick={() => createEvent(false)}>

@@ -50,6 +50,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const [checkinToken, setCheckinToken] = useState<string | null>(null);
   const [prelinkToken, setPrelinkToken] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState(false);
+  const [matchingMode, setMatchingMode] = useState<'max_pairs' | 'greedy_priority'>('max_pairs');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // undefined = 未取得。取得済みなら以後のポーリングで編集中の内容を上書きしない
@@ -80,17 +81,20 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
     if (!token) return;
     const [{ data: event }, { data: state }] = await Promise.all([
       supabase.from('events')
-        .select('checkin_token, prelink_token, is_demo, profile_field_keys').eq('id', eventId).single(),
+        .select('checkin_token, prelink_token, is_demo, profile_field_keys, matching_mode')
+        .eq('id', eventId).single(),
       supabase.from('event_states').select('phase, updated_at').eq('event_id', eventId).single(),
     ]);
     if (event) {
       const e = event as {
         checkin_token: string; prelink_token: string;
         is_demo: boolean; profile_field_keys: string[] | null;
+        matching_mode: 'max_pairs' | 'greedy_priority';
       };
       setCheckinToken(e.checkin_token);
       setPrelinkToken(e.prelink_token);
       setIsDemo(e.is_demo);
+      setMatchingMode(e.matching_mode);
       setProfileFields((prev) => (prev === undefined ? e.profile_field_keys : prev));
     }
     let currentPhase = phase;
@@ -258,8 +262,14 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
 
   return (
     <main>
-      <h1>イベント進行</h1>
-      {message && <div className="error" style={{ marginBottom: 12 }}>{message}</div>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <h1 style={{ margin: 0 }}>イベント進行</h1>
+        {/* ★確定操作を挟まず常時見える位置に出す。あとから「どちらの方式で確定したか忘れる」事故を防ぐため */}
+        <span className={`my-number ${matchingMode === 'greedy_priority' ? 'female' : 'male'}`}>
+          マッチング方式: {matchingMode === 'greedy_priority' ? '第1希望優先' : '最大組数'}
+        </span>
+      </div>
+      {message && <div className="error" style={{ margin: '12px 0' }}>{message}</div>}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>進行ステップ</h2>
@@ -339,9 +349,13 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
             className: phase === 'calculating' ? 'primary' : '',
             onClick: () => run(
               () => finalizeEvent(eventId, token),
-              previewResult
-                ? `${previewResult.matchedPairsCount} 組（${pairText(previewResult.pairs)}）を確定して結果を配信しますか？`
-                : `最終希望の登録は ${progress?.finalVoted ?? 0} / ${progress?.checkedIn ?? 0} 名です。確定して結果を配信しますか？`,
+              // ★確定直前の最後の確認に必ず方式名を含める。押し間違い・方式の勘違いによる
+              //   事故（意図しない方式で配信してしまう）を防ぐため
+              `【${matchingMode === 'greedy_priority' ? '第1希望優先' : '最大組数'}】方式で確定します。\n` + (
+                previewResult
+                  ? `${previewResult.matchedPairsCount} 組（${pairText(previewResult.pairs)}）を確定して結果を配信しますか？`
+                  : `最終希望の登録は ${progress?.finalVoted ?? 0} / ${progress?.checkedIn ?? 0} 名です。確定して結果を配信しますか？`
+              ),
             ),
             children: phase === 'calculating' && (
               <div className="notice" style={{ marginTop: 8 }}>
