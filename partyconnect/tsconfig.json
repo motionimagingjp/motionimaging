@@ -32,6 +32,10 @@
   "exclude": [
     "node_modules",
     "supabase",
-    "tests"
+    "tests",
+    "qa/algorithm-test.ts",
+    "qa/algorithm-stress-test.ts",
+    "qa/algorithm-max-match-test.ts",
+    "qa/likes-test.ts"
   ]
 }
