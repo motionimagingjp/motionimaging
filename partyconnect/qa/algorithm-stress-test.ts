@@ -15,10 +15,13 @@ const MALE_COUNT = 45;
 const FEMALE_COUNT = 50;
 const POPULAR_MALES = ['M1', 'M2'];
 const POPULAR_FEMALES = ['W1', 'W2'];
-const POPULAR_BIAS_PROB = 0.2; // 人気者に票が集中する確率
+const POPULAR_BIAS_PROB = 0.1; // 人気者に票が集中する確率（0.2は集中が強すぎたため緩和）
 
+// ★既定は固定シード。Date.now()だと実行のたびに相互指名の実数（母数）自体が
+//   大きくブレて結果が比較できなくなる（実際に「2組」と「8組」でブレて問い合わせが来た）。
+//   再現性を優先し、変えたい場合だけ --seed= で明示的に指定する。
 const seedArg = Deno.args.find((a) => a.startsWith('--seed='));
-const seed = seedArg ? Number(seedArg.split('=')[1]) : Date.now();
+const seed = seedArg ? Number(seedArg.split('=')[1]) : 42;
 
 // mulberry32。seedを固定すれば毎回同じデータで再現できる
 function mulberry32(a: number): () => number {
@@ -55,20 +58,64 @@ function pickTargets(pool: string[], popular: string[], count: number): string[]
   return picked;
 }
 
+/**
+ * 最終投票の人数。均一に1〜3人ではなく、実際の会場に近い分布（大半は枠を使い切る）にする。
+ * 均一分布だと平均枠数が2人しかなく、45×50の母数では相互指名がほぼ生まれない
+ * （実測: 相互指名わずか8件。バグではなく母数不足が主因だった）。
+ */
+function finalVoteCount(): number {
+  const r = rng();
+  if (r < 0.6) return 3;
+  if (r < 0.85) return 2;
+  return 1;
+}
+
 const nominations: Nomination[] = [];
+const finalByPerson: Record<string, string[]> = {};
 
 // 第一印象（好印象）: 各3〜8名。順位は付かないため matching には使わないが、生成ロジックとして用意する
 for (const id of maleIds) pickTargets(femaleIds, POPULAR_FEMALES, randInt(3, 8));
 for (const id of femaleIds) pickTargets(maleIds, POPULAR_MALES, randInt(3, 8));
 
-// 最終投票: 各最大3名（1〜3名）。順位1〜3がそのままmatchingの点数になる
+// 最終投票: 順位1〜3がそのままmatchingの点数になる
 for (const id of maleIds) {
-  const targets = pickTargets(femaleIds, POPULAR_FEMALES, randInt(1, 3));
+  const targets = pickTargets(femaleIds, POPULAR_FEMALES, finalVoteCount());
+  finalByPerson[id] = targets;
   targets.forEach((to, i) => nominations.push({ from: id, to, order: i + 1 }));
 }
 for (const id of femaleIds) {
-  const targets = pickTargets(maleIds, POPULAR_MALES, randInt(1, 3));
+  const targets = pickTargets(maleIds, POPULAR_MALES, finalVoteCount());
+  finalByPerson[id] = targets;
   targets.forEach((to, i) => nominations.push({ from: id, to, order: i + 1 }));
+}
+
+// --- 診断出力（IDズレ・バイアス偏りの目視確認用） -------------------------------
+const verbose = !Deno.args.includes('--quiet');
+if (verbose) {
+  console.log('=== 診断: 最初の男女3名分の最終投票 ===');
+  for (const id of ['M1', 'M2', 'M3', 'W1', 'W2', 'W3']) {
+    console.log(`  ${id}: [${finalByPerson[id].join(', ')}]`);
+  }
+
+  const nominatedCount: Record<string, number> = {};
+  for (const n of nominations) nominatedCount[n.to] = (nominatedCount[n.to] ?? 0) + 1;
+  const top5 = Object.entries(nominatedCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  console.log('\n=== 診断: 被指名回数トップ5（人気集中の実態） ===');
+  for (const [id, c] of top5) console.log(`  ${id}: ${c}件`);
+
+  const pointsMap = new Map<string, Map<string, number>>();
+  for (const n of nominations) {
+    if (!pointsMap.has(n.from)) pointsMap.set(n.from, new Map());
+    pointsMap.get(n.from)!.set(n.to, n.order);
+  }
+  let mutualEdges = 0;
+  for (const m of maleIds) {
+    for (const f of pointsMap.get(m)?.keys() ?? []) {
+      if (pointsMap.get(f)?.has(m)) mutualEdges++;
+    }
+  }
+  console.log(`\n=== 診断: 相互指名(mutual edge)の実数 = ${mutualEdges}件 ===`);
+  console.log('（成立組数はこの相互指名の中から重複なく最大数を選んだ結果になるはず）\n');
 }
 
 const startedAt = performance.now();
