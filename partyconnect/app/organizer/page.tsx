@@ -43,6 +43,7 @@ export default function OrganizerHome() {
   const [eventTime, setEventTime] = useState('13:00');
   const [checkinTime, setCheckinTime] = useState('12:45');
   const [matchingMode, setMatchingMode] = useState<'max_pairs' | 'greedy_priority'>('max_pairs');
+  const [orgAgreed, setOrgAgreed] = useState(false);
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -171,12 +172,19 @@ export default function OrganizerHome() {
           </p>
         )}
 
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+          <input type="checkbox" checked={orgAgreed}
+            onChange={(e) => setOrgAgreed(e.target.checked)}
+            style={{ width: 20, height: 20, minHeight: 20 }} />
+          <Link href="/terms" target="_blank">利用規約</Link>に同意します
+        </label>
+
         <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-          <button type="button" className="primary" disabled={busy || !eventName || !phone}
+          <button type="button" className="primary" disabled={busy || !eventName || !phone || !orgAgreed}
             onClick={() => createEvent(false)}>
             イベントを作成
           </button>
-          <button type="button" disabled={busy || !phone} onClick={() => createEvent(true)}>
+          <button type="button" disabled={busy || !phone || !orgAgreed} onClick={() => createEvent(true)}>
             デモイベントを作成（ダミー20名で一人で試せます）
           </button>
         </div>

@@ -1,5 +1,6 @@
 'use client';
 import { use, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ApiError, checkin } from '../../../lib/api';
 import { saveSessionToken } from '../../../lib/storage';
@@ -65,7 +66,7 @@ export default function PrelinkPage({ params }: { params: Promise<{ prelinkToken
             onChange={(e) => setAgreed(e.target.checked)}
             style={{ width: 24, height: 24, minHeight: 24 }}
           />
-          利用規約とプライバシーポリシーに同意します
+          <Link href="/terms" target="_blank">利用規約</Link>とプライバシーポリシーに同意します
         </label>
       </div>
 

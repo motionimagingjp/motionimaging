@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   ApiError, checkin, getResult, listParticipants, submitVote,
   type ListResult, type ResultPayload,
@@ -211,7 +212,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
               onChange={(e) => setAgreed(e.target.checked)}
               style={{ width: 24, height: 24, minHeight: 24 }}
             />
-            利用規約とプライバシーポリシーに同意します
+            <Link href="/terms" target="_blank">利用規約</Link>とプライバシーポリシーに同意します
           </label>
         </div>
         {error && <div className="error">{error}</div>}
