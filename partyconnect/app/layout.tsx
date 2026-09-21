@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'PartyConnect',
+  title: 'SCADコネクト',
   description: '街コンの受付からマッチングまでを進める進行システム',
   manifest: '/manifest.json',
 };

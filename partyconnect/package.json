@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "街コン運営WEBアプリ PartyConnect",
+  "description": "街コン運営WEBアプリ SCADコネクト（旧称: PartyConnect）",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

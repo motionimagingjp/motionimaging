@@ -1,6 +1,10 @@
-# PartyConnect
+# SCADコネクト
 
 街コンの受付〜マッチング〜データ消去までを完結させる主催者向け進行システム。
+MOTIONIMAGING LABの「SCAD」シリーズ（婚活AIチャット「スクアド」、「SCADビューティー」）と
+同じブランドファミリーとして展開するため、旧称 PartyConnect から改称。
+ディレクトリ名・DBスキーマ・Cronジョブ名など内部識別子は `partyconnect` のまま変更していない
+（インフラ設定との整合性を優先。表示名・UI文言のみ改称対象）。
 
 - 仕様: [`../docs/partyconnect_requirements.md`](../docs/partyconnect_requirements.md)
 - このディレクトリは自己完結しており、そのまま独立リポジトリへ移せる構成になっている

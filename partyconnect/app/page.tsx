@@ -3,7 +3,7 @@ import Link from 'next/link';
 export default function Home() {
   return (
     <main>
-      <h1>PartyConnect</h1>
+      <h1>SCADコネクト</h1>
       <p className="muted">街コンの受付からマッチングまでを進める進行システム</p>
 
       <div className="card">
