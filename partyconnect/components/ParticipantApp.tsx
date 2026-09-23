@@ -3,13 +3,14 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ApiError, checkin, getResult, listParticipants, submitVote,
-  type ListResult, type ResultPayload,
+  type Branding, type ListResult, type ResultPayload,
 } from '../lib/api';
 import { watchPhase } from '../lib/phase';
 import {
   clearEventLocalData, loadMemos, loadSessionToken, loadVoteDraft,
   saveMemos, saveSessionToken, saveVoteDraft, type MemoMap,
 } from '../lib/storage';
+import BrandBar from './BrandBar';
 import PersonList from './PersonList';
 import ProfileForm from './ProfileForm';
 import ResultScreen from './ResultScreen';
@@ -30,6 +31,7 @@ const LIST_PHASES = ['browse', 'like_vote', 'like_reveal', 'final_vote', 'calcul
 export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string | null }) {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
+  const [branding, setBranding] = useState<Branding | null>(null);
   const [phase, setPhase] = useState<string>('checkin');
   const [step, setStep] = useState<'checkin' | 'arrive' | 'number' | 'profile' | 'event'>('checkin');
   const [agreed, setAgreed] = useState(false);
@@ -58,6 +60,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
     try {
       const res = await checkin({ sessionToken, agreed: withConsent });
       setNeedsConsent(false);
+      setBranding(res.branding);
       setMe({
         eventId: res.eventId,
         gender: res.gender,
@@ -197,6 +200,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
     }
     return (
       <main>
+        <BrandBar branding={branding} />
         <h1>受付</h1>
         <div className="card">
           <p>お申し込みありがとうございます。以下をご確認のうえ受付を完了してください。</p>
@@ -334,6 +338,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
 
   return (
     <main>
+      <BrandBar branding={branding} />
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <h1 style={{ margin: 0 }}>
           {phase === 'like_vote' ? '気になる方を選ぶ'

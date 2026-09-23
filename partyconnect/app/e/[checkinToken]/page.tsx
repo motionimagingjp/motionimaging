@@ -1,9 +1,10 @@
 'use client';
-import { use, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ApiError, checkin } from '../../../lib/api';
+import { ApiError, checkin, getBranding, type Branding } from '../../../lib/api';
 import { saveSessionToken } from '../../../lib/storage';
+import BrandBar from '../../../components/BrandBar';
 
 /**
  * 会場に掲示したQRから開く受付ページ。ここで6桁コードを引き換えると出席登録まで完了する。
@@ -20,6 +21,11 @@ export default function ClaimPage({ params }: { params: Promise<{ checkinToken: 
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [branding, setBranding] = useState<Branding | null>(null);
+
+  useEffect(() => {
+    void getBranding({ checkinToken }).then(setBranding).catch(() => setBranding(null));
+  }, [checkinToken]);
 
   const submit = async () => {
     setBusy(true);
@@ -36,6 +42,7 @@ export default function ClaimPage({ params }: { params: Promise<{ checkinToken: 
 
   return (
     <main>
+      <BrandBar branding={branding} />
       <h1>チェックイン</h1>
       <div className="card">
         <p>

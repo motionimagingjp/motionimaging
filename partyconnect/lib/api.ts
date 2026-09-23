@@ -57,6 +57,12 @@ export async function callFunction<T>(
 
 // ---- 参加者向け ----
 
+export interface Branding {
+  companyName: string | null;
+  brandColor: string | null;
+  logoUrl: string | null;
+}
+
 export interface CheckinResult {
   sessionToken: string;
   eventId: string;
@@ -69,6 +75,7 @@ export interface CheckinResult {
   freeText: string | null;
   // null = 全項目使用。イベントごとに主催者が使う項目だけを絞り込める
   enabledProfileFields: string[] | null;
+  branding: Branding;
 }
 
 /**
@@ -81,6 +88,10 @@ export const checkin = (body: {
   sessionToken?: string; checkinToken?: string; prelinkToken?: string;
   claimCode?: string; agreed: boolean;
 }) => callFunction<CheckinResult>('checkin', body);
+
+// 受付コード入力前（未認証）でも呼べる、主催者のブランド設定の取得
+export const getBranding = (body: { checkinToken?: string; prelinkToken?: string }) =>
+  callFunction<Branding>('branding', body);
 
 export const saveProfile = (body: {
   sessionToken: string; nickname: string; profileData: Record<string, string | string[]>; freeText: string;
@@ -170,3 +181,15 @@ export const finalizeEvent = (eventId: string, accessToken: string) =>
 
 export const purgeEvent = (eventId: string, accessToken: string) =>
   callFunction<{ purged: boolean }>('purge', { eventId }, accessToken);
+
+// ロゴは非公開バケットではないため、署名付きURLを介さず本人の supabase-js クライアントで
+// 直接アップロードする（storage.objects のRLSで自分のフォルダ配下にしか書けない）
+export async function uploadOrganizerLogo(
+  storage: ReturnType<typeof createClient>['storage'], organizerId: string, file: File,
+): Promise<string> {
+  const path = `${organizerId}/logo`;
+  const { error } = await storage.from('organizer-logos')
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (error) throw new ApiError(error.message, 0);
+  return path;
+}

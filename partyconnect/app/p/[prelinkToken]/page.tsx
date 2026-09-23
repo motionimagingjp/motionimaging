@@ -1,9 +1,10 @@
 'use client';
-import { use, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ApiError, checkin } from '../../../lib/api';
+import { ApiError, checkin, getBranding, type Branding } from '../../../lib/api';
 import { saveSessionToken } from '../../../lib/storage';
+import BrandBar from '../../../components/BrandBar';
 
 /**
  * 事前案内のイベント共通リンク。受付コードを入れるとプロフィール入力画面に入れる。
@@ -21,6 +22,11 @@ export default function PrelinkPage({ params }: { params: Promise<{ prelinkToken
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [branding, setBranding] = useState<Branding | null>(null);
+
+  useEffect(() => {
+    void getBranding({ prelinkToken }).then(setBranding).catch(() => setBranding(null));
+  }, [prelinkToken]);
 
   const submit = async () => {
     setBusy(true);
@@ -37,6 +43,7 @@ export default function PrelinkPage({ params }: { params: Promise<{ prelinkToken
 
   return (
     <main>
+      <BrandBar branding={branding} />
       <h1>事前プロフィール登録</h1>
       <div className="card">
         <p>お申し込みありがとうございます。以下をご確認のうえ受付を完了してください。</p>

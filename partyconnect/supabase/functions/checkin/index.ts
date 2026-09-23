@@ -102,13 +102,21 @@ Deno.serve(async (req) => {
     }
 
     const { data: event, error: eventError } = await db
-      .from('events').select('profile_field_keys').eq('id', found.event_id).single();
+      .from('events').select('profile_field_keys, organizer_id').eq('id', found.event_id).single();
     if (eventError) throw eventError;
 
     // 保存済みのプロフィールを返す。返さないと、別端末やキャッシュ削除のあとに
     // 編集画面が空で開き、そのまま保存して入力済みの内容を消してしまう
     const keyStore = new PostgresEventKeyStore(db);
     const dataKey = await keyStore.getKey(found.event_id);
+
+    // 主催者のブランド設定（会社名・ロゴ・イメージカラー）。未設定ならnullのまま返す
+    const { data: organizer } = await db
+      .from('organizers').select('company_name, brand_color, logo_path')
+      .eq('id', (event as { organizer_id: string }).organizer_id).maybeSingle();
+    const logoUrl = organizer?.logo_path
+      ? db.storage.from('organizer-logos').getPublicUrl(organizer.logo_path as string).data.publicUrl
+      : null;
 
     return json({
       sessionToken,
@@ -120,6 +128,11 @@ Deno.serve(async (req) => {
       profileData: found.profile_data ?? {},
       freeText: await decryptOptional(found.free_text, dataKey),
       enabledProfileFields: (event as { profile_field_keys: string[] | null }).profile_field_keys,
+      branding: {
+        companyName: organizer?.company_name ?? null,
+        brandColor: organizer?.brand_color ?? null,
+        logoUrl,
+      },
     });
   } catch (error) {
     return toErrorResponse(error);

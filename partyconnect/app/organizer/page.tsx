@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabaseBrowser } from '../../lib/supabase-browser';
+import { uploadOrganizerLogo } from '../../lib/api';
 
 interface EventRow {
   id: string; event_name: string; event_date: string | null;
@@ -47,6 +48,13 @@ export default function OrganizerHome() {
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [brandColor, setBrandColor] = useState('#16a34a');
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPath, setLogoPath] = useState<string | null>(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [brandBusy, setBrandBusy] = useState(false);
+  const [brandMessage, setBrandMessage] = useState<string | null>(null);
 
   // 開催時刻を変えたら、受付開始時刻もデフォルトの「15分前」に追従させる
   const onEventTimeChange = (value: string) => {
@@ -62,17 +70,30 @@ export default function OrganizerHome() {
     setEvents((data ?? []) as EventRow[]);
   }, [supabase]);
 
+  // まだ一度もイベントを作っていない主催者は organizers に行が無いので、無ければ何もしない
+  const loadBranding = useCallback(async () => {
+    const { data } = await supabase
+      .from('organizers').select('company_name, brand_color, logo_path').maybeSingle();
+    if (!data) return;
+    setCompanyName((data.company_name as string | null) ?? '');
+    setBrandColor((data.brand_color as string | null) ?? '#16a34a');
+    if (data.logo_path) {
+      setLogoPath(data.logo_path as string);
+      setLogoPreviewUrl(supabase.storage.from('organizer-logos').getPublicUrl(data.logo_path as string).data.publicUrl);
+    }
+  }, [supabase]);
+
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => {
       setSignedIn(Boolean(data.session));
-      if (data.session) void loadEvents();
+      if (data.session) { void loadEvents(); void loadBranding(); }
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setSignedIn(Boolean(session));
-      if (session) void loadEvents();
+      if (session) { void loadEvents(); void loadBranding(); }
     });
     return () => sub.subscription.unsubscribe();
-  }, [supabase, loadEvents]);
+  }, [supabase, loadEvents, loadBranding]);
 
   const sendMagicLink = async () => {
     setBusy(true);
@@ -113,6 +134,39 @@ export default function OrganizerHome() {
     }
   };
 
+  const saveBranding = async () => {
+    setBrandBusy(true);
+    setBrandMessage(null);
+    try {
+      const { error: orgError } = await supabase.rpc('ensure_organizer', { p_phone_number: phone });
+      if (orgError) throw orgError;
+
+      // ★RPCはlogo_pathも直接SETするため、新しくアップロードしていなくても
+      //   既存のパスを必ず一緒に送る（省略すると保存済みロゴが消えてしまう）
+      let nextLogoPath = logoPath;
+      if (logoFile) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) throw new Error('ログインが必要です');
+        nextLogoPath = await uploadOrganizerLogo(supabase.storage, userData.user.id, logoFile);
+        setLogoPath(nextLogoPath);
+        setLogoPreviewUrl(supabase.storage.from('organizer-logos').getPublicUrl(nextLogoPath).data.publicUrl);
+        setLogoFile(null);
+      }
+
+      const { error } = await supabase.rpc('update_organizer_branding', {
+        p_company_name: companyName || null,
+        p_brand_color: brandColor,
+        p_logo_path: nextLogoPath,
+      });
+      if (error) throw error;
+      setBrandMessage('保存しました');
+    } catch (e) {
+      setBrandMessage(e instanceof Error ? e.message : '保存に失敗しました');
+    } finally {
+      setBrandBusy(false);
+    }
+  };
+
   if (signedIn === null) return <main><p className="muted">読み込み中…</p></main>;
 
   if (!signedIn) {
@@ -136,6 +190,43 @@ export default function OrganizerHome() {
   return (
     <main>
       <h1>主催者コンソール</h1>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>ブランド設定</h2>
+        <p className="muted" style={{ marginTop: -4 }}>
+          会社名・ロゴ・イメージカラーを設定すると、参加者の受付画面にも反映されます。
+        </p>
+        <label htmlFor="companyName">会社名</label>
+        <input id="companyName" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+
+        <label htmlFor="brandColor">イメージカラー</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input id="brandColor" type="color" style={{ width: 56, padding: 4 }}
+            value={brandColor} onChange={(e) => setBrandColor(e.target.value)} />
+          <span className="muted">{brandColor}</span>
+        </div>
+
+        <label htmlFor="logo">ロゴ画像</label>
+        {logoPreviewUrl && (
+          // eslint-disable-next-line @next/next/no-img-element -- Supabase Storageの動的URLのため
+          <img src={logoPreviewUrl} alt="" style={{ height: 48, width: 48, objectFit: 'contain', borderRadius: 8, marginBottom: 8 }} />
+        )}
+        <input id="logo" type="file" accept="image/png,image/jpeg,image/webp"
+          onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)} />
+
+        <div style={{ marginTop: 12 }}>
+          <button type="button" className="primary" disabled={brandBusy || !phone}
+            onClick={saveBranding}>
+            {brandBusy ? '保存中…' : 'ブランド設定を保存'}
+          </button>
+        </div>
+        {!phone && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            下の「イベントを作る」欄に電話番号を入力すると保存できます。
+          </p>
+        )}
+        {brandMessage && <p className="muted" style={{ marginTop: 8 }}>{brandMessage}</p>}
+      </div>
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>イベントを作る</h2>
