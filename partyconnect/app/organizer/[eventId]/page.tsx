@@ -282,17 +282,30 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
 
   return (
     <main>
-      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <h1 style={{ margin: 0 }}>イベント進行</h1>
-        {/* ★確定操作を挟まず常時見える位置に出す。あとから「どちらの方式で確定したか忘れる」事故を防ぐため */}
-        {isCheckinOnly ? (
-          <span className="my-number">受付のみ</span>
-        ) : (
-          <span className={`my-number ${matchingMode === 'greedy_priority' ? 'female' : 'male'}`}>
-            マッチング方式: {matchingMode === 'greedy_priority' ? '第1希望優先' : '最大組数'}
-          </span>
-        )}
+      {/* ★イベント種別は作成時に固定され、あとから変更できない（DB側でも投票フェーズ等への
+          移行を拒否している）。ここでは「今どちらのシステムで動いているか」を一番上で
+          常に分かるようにするための表示で、押しても切り替わらない（disabled）。
+          切り替えたい場合は主催者コンソールから新しいイベントを作る */}
+      <div className="tabs" style={{ marginBottom: 4 }}>
+        {/* onClickを持たせず見た目だけの表示にする（disabledにすると薄く見えて
+            「今どちらのモードか」が逆にわかりにくくなるため、押せないが濃い表示のままにする） */}
+        <button type="button" aria-pressed={isCheckinOnly} style={{ cursor: 'default' }} tabIndex={-1}>
+          受付のみ
+        </button>
+        <button type="button" aria-pressed={!isCheckinOnly} style={{ cursor: 'default' }} tabIndex={-1}>
+          マッチングあり
+        </button>
       </div>
+      <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+        このイベントの種類です（作成時に選択。あとから変更はできません）。
+      </p>
+
+      <h1 style={{ margin: '0 0 4px' }}>イベント進行</h1>
+      {!isCheckinOnly && (
+        <p className="muted" style={{ marginTop: 0 }}>
+          マッチング方式: {matchingMode === 'greedy_priority' ? '第1希望優先' : '最大組数'}
+        </p>
+      )}
       {message && <div className="error" style={{ margin: '12px 0' }}>{message}</div>}
 
       <div className="card">
