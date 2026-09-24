@@ -458,18 +458,16 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         )}
       </div>
 
-      {/* 受付のみ（無料）は、マッチング機能つきイベントへの導入口として提供している */}
+      {/* 受付のみ（無料）は、マッチング機能つきイベントへの導入口として提供している。
+          ★カード化すると運営中の画面で目立ちすぎて邪魔になる（実際に指摘された）ため、
+          細いテキストリンク1行だけにして、普段は視線を取らないようにしている */}
       {isCheckinOnly && (
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>交流会・婚活イベントもこのまま運営できます</h2>
-          <p className="muted" style={{ marginBottom: 12 }}>
-            「マッチングあり」で作成すると、今の受付に加えて、参加者どうしの好印象の送信・最終希望の投票・
-            カップル成立の自動集計と発表までをスマホだけで行えます。紙の集計や読み上げミスがなくなります。
-          </p>
-          <Link href="/organizer" className="btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+        <p className="muted" style={{ textAlign: 'center', margin: '16px 0 20px' }}>
+          交流会・婚活イベントも運営できます →{' '}
+          <Link href="/organizer" style={{ color: 'var(--accent)', fontWeight: 700, textDecoration: 'underline' }}>
             マッチングありのイベントを作成する
           </Link>
-        </div>
+        </p>
       )}
 
       {pairs.length > 0 && (
