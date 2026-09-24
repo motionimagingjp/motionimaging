@@ -17,7 +17,7 @@ interface Body {
     | 'progress' | 'issue_slots' | 'roster' | 'withdraw' | 'pairs' | 'demo_seed' | 'preview_result'
     | 'checkin_by_code';
   eventId: string;
-  gender?: 'male' | 'female';
+  gender?: 'male' | 'female' | 'none';
   count?: number;
   isProxy?: boolean;
   participantNumber?: number;
@@ -156,7 +156,8 @@ Deno.serve(async (req) => {
 
       case 'issue_slots': {
         const count = Math.min(Math.max(body.count ?? 1, 1), 100);
-        if (body.gender !== 'male' && body.gender !== 'female') {
+        // 'none' は受付のみイベント用。種別と性別の組み合わせは issue_participant_slot が検証する
+        if (body.gender !== 'male' && body.gender !== 'female' && body.gender !== 'none') {
           throw new AppError('性別を指定してください');
         }
         const issued: { claimCode: string; sessionToken: string }[] = [];

@@ -57,6 +57,10 @@ export async function callFunction<T>(
 
 // ---- 参加者向け ----
 
+// 'none' は受付のみイベントの参加者（性別を聞かず通し番号で受付する）
+export type Gender = 'male' | 'female' | 'none';
+export type EventMode = 'matching' | 'checkin_only';
+
 export interface Branding {
   companyName: string | null;
   brandColor: string | null;
@@ -66,7 +70,7 @@ export interface Branding {
 export interface CheckinResult {
   sessionToken: string;
   eventId: string;
-  gender: 'male' | 'female';
+  gender: Gender;
   // null = まだ会場到着チェックインが済んでいない（事前入力のみの状態）
   participantNumber: number | null;
   nickname: string | null;
@@ -75,6 +79,7 @@ export interface CheckinResult {
   freeText: string | null;
   // null = 全項目使用。イベントごとに主催者が使う項目だけを絞り込める
   enabledProfileFields: string[] | null;
+  eventMode: EventMode;
   branding: Branding;
 }
 

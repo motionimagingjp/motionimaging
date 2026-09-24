@@ -8,6 +8,7 @@ interface EventRow {
   id: string; event_name: string; event_date: string | null;
   event_time: string | null; checkin_time: string | null;
   status: string; is_demo: boolean; passcode: string;
+  event_mode: 'matching' | 'checkin_only';
 }
 
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
@@ -43,6 +44,7 @@ export default function OrganizerHome() {
   const [eventDate, setEventDate] = useState(defaultEventDate);
   const [eventTime, setEventTime] = useState('13:00');
   const [checkinTime, setCheckinTime] = useState('12:45');
+  const [eventMode, setEventMode] = useState<'matching' | 'checkin_only'>('matching');
   const [matchingMode, setMatchingMode] = useState<'max_pairs' | 'greedy_priority'>('max_pairs');
   const [orgAgreed, setOrgAgreed] = useState(false);
   const [phone, setPhone] = useState('');
@@ -65,7 +67,7 @@ export default function OrganizerHome() {
   const loadEvents = useCallback(async () => {
     const { data } = await supabase
       .from('events')
-      .select('id, event_name, event_date, event_time, checkin_time, status, is_demo, passcode')
+      .select('id, event_name, event_date, event_time, checkin_time, status, is_demo, passcode, event_mode')
       .order('created_at', { ascending: false });
     setEvents((data ?? []) as EventRow[]);
   }, [supabase]);
@@ -120,11 +122,13 @@ export default function OrganizerHome() {
         p_is_demo: isDemo,
         p_event_time: isDemo ? null : eventTime,
         p_checkin_time: isDemo ? null : checkinTime,
-        // デモは常にmax_pairs固定（サーバー側でも強制している）。ここでは通常イベントの選択を渡す
+        // デモは常にマッチングあり・max_pairs固定（サーバー側でも強制している）
         p_matching_mode: matchingMode,
+        p_event_mode: isDemo ? 'matching' : eventMode,
       });
       if (error) throw error;
       setEventName('');
+      setEventMode('matching');
       setMatchingMode('max_pairs');
       await loadEvents();
     } catch (e) {
@@ -241,26 +245,52 @@ export default function OrganizerHome() {
         <label htmlFor="checkinTime">受付開始時刻</label>
         <input id="checkinTime" type="time" value={checkinTime} onChange={(e) => setCheckinTime(e.target.value)} />
 
-        <label>マッチング方式</label>
+        <label>イベントの種類</label>
         <div className="tabs">
-          <button type="button" aria-pressed={matchingMode === 'max_pairs'}
-            onClick={() => setMatchingMode('max_pairs')}>
-            最大組数（推奨）
+          <button type="button" aria-pressed={eventMode === 'matching'}
+            onClick={() => setEventMode('matching')}>
+            マッチングあり
           </button>
-          <button type="button" aria-pressed={matchingMode === 'greedy_priority'}
-            onClick={() => setMatchingMode('greedy_priority')}>
-            第1希望優先
+          <button type="button" aria-pressed={eventMode === 'checkin_only'}
+            onClick={() => setEventMode('checkin_only')}>
+            受付のみ（無料）
           </button>
         </div>
-        {matchingMode === 'greedy_priority' ? (
+        {eventMode === 'checkin_only' ? (
           <p className="muted" style={{ marginTop: -4 }}>
-            相思相愛の熱量が強いペアを優先して成立させます。<strong>全体の成立組数は
-            「最大組数」より少なくなることがあります。</strong>迷ったら「最大組数」を選んでください。
+            受付と人数管理だけを使います。性別は分けず、来場順に通し番号（No.1〜）で受付します。
+            セミナー・交流会・社内イベントなどにどうぞ。<strong>無料でご利用いただけます。</strong>
           </p>
         ) : (
           <p className="muted" style={{ marginTop: -4 }}>
-            会場全体で成立するカップル数が最も多くなるよう自動計算します（通常はこちらで問題ありません）。
+            受付から好印象・最終希望の投票、カップル成立の集計・発表までを行います（婚活・街コン向け）。
           </p>
+        )}
+
+        {eventMode === 'matching' && (
+          <>
+            <label>マッチング方式</label>
+            <div className="tabs">
+              <button type="button" aria-pressed={matchingMode === 'max_pairs'}
+                onClick={() => setMatchingMode('max_pairs')}>
+                最大組数（推奨）
+              </button>
+              <button type="button" aria-pressed={matchingMode === 'greedy_priority'}
+                onClick={() => setMatchingMode('greedy_priority')}>
+                第1希望優先
+              </button>
+            </div>
+            {matchingMode === 'greedy_priority' ? (
+              <p className="muted" style={{ marginTop: -4 }}>
+                相思相愛の熱量が強いペアを優先して成立させます。<strong>全体の成立組数は
+                「最大組数」より少なくなることがあります。</strong>迷ったら「最大組数」を選んでください。
+              </p>
+            ) : (
+              <p className="muted" style={{ marginTop: -4 }}>
+                会場全体で成立するカップル数が最も多くなるよう自動計算します（通常はこちらで問題ありません）。
+              </p>
+            )}
+          </>
         )}
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
@@ -289,6 +319,7 @@ export default function OrganizerHome() {
           style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
           <strong>{event.event_name}</strong>
           {event.is_demo && <span className="star"> デモ</span>}
+          {event.event_mode === 'checkin_only' && <span className="star"> 受付のみ</span>}
           <div className="muted">{formatSchedule(event)}</div>
           <div className="muted">
             {event.status} / 4桁コード {event.passcode}

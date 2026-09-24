@@ -1,8 +1,9 @@
 'use client';
 import { use, useCallback, useEffect, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import {
   finalizeEvent, organizerCall, purgeEvent,
-  type PendingVoter, type PreviewResult, type Progress,
+  type EventMode, type Gender, type PendingVoter, type PreviewResult, type Progress,
 } from '../../../lib/api';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { PROFILE_FIELDS, optionsPreview } from '../../../lib/profile-options';
@@ -23,7 +24,7 @@ const PHASE_SEQUENCE = [
 type StepState = 'done' | 'current' | 'future';
 
 interface RosterRow {
-  gender: 'male' | 'female';
+  gender: Gender;
   number: number | null;
   status: string;
   nickname: string | null;
@@ -31,10 +32,14 @@ interface RosterRow {
   hasProfile: boolean;
 }
 
-/** 参加者の状態を記号1文字にする。表で一列ずつ読まなくても全体が掴めるようにする */
-function statusMark(row: RosterRow): { mark: string; label: string } {
+/**
+ * 参加者の状態を記号1文字にする。表で一列ずつ読まなくても全体が掴めるようにする。
+ * 受付のみイベントはプロフィールを使わないので、○/◎ を分けない
+ */
+function statusMark(row: RosterRow, checkinOnly: boolean): { mark: string; label: string } {
   if (row.status === 'withdrawn') return { mark: '×', label: '辞退' };
   if (row.number === null) return { mark: '△', label: '未受付' };
+  if (checkinOnly) return { mark: '○', label: '受付済' };
   if (!row.hasProfile) return { mark: '○', label: '受付済（プロフ未入力）' };
   return { mark: '◎', label: '受付済・プロフ入力済' };
 }
@@ -51,6 +56,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   const [prelinkToken, setPrelinkToken] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState(false);
   const [matchingMode, setMatchingMode] = useState<'max_pairs' | 'greedy_priority'>('max_pairs');
+  const [eventMode, setEventMode] = useState<EventMode>('matching');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // undefined = 未取得。取得済みなら以後のポーリングで編集中の内容を上書きしない
@@ -81,7 +87,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
     if (!token) return;
     const [{ data: event }, { data: state }] = await Promise.all([
       supabase.from('events')
-        .select('checkin_token, prelink_token, is_demo, profile_field_keys, matching_mode')
+        .select('checkin_token, prelink_token, is_demo, profile_field_keys, matching_mode, event_mode')
         .eq('id', eventId).single(),
       supabase.from('event_states').select('phase, updated_at').eq('event_id', eventId).single(),
     ]);
@@ -90,11 +96,13 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         checkin_token: string; prelink_token: string;
         is_demo: boolean; profile_field_keys: string[] | null;
         matching_mode: 'max_pairs' | 'greedy_priority';
+        event_mode: EventMode;
       };
       setCheckinToken(e.checkin_token);
       setPrelinkToken(e.prelink_token);
       setIsDemo(e.is_demo);
       setMatchingMode(e.matching_mode);
+      setEventMode(e.event_mode);
       setProfileFields((prev) => (prev === undefined ? e.profile_field_keys : prev));
     }
     let currentPhase = phase;
@@ -147,18 +155,22 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
     if (error) throw error;
   });
 
-  const issue = (gender: 'male' | 'female') => run(async () => {
+  const isCheckinOnly = eventMode === 'checkin_only';
+
+  const issue = (gender: Gender) => run(async () => {
     if (!token) return;
     await organizerCall({ action: 'issue_slots', eventId, gender, count: issueCount, isProxy: true }, token);
   });
 
+  const genderLabel = (gender: Gender) => (gender === 'male' ? '男性 ' : gender === 'female' ? '女性 ' : '');
+
   const checkinByCode = () => run(async () => {
     if (!token || manualCode.length < 6) return;
-    const res = await organizerCall<{ gender: 'male' | 'female'; participantNumber: number }>(
+    const res = await organizerCall<{ gender: Gender; participantNumber: number }>(
       { action: 'checkin_by_code', eventId, claimCode: manualCode }, token,
     );
     setManualCode('');
-    setMessage(`${res.gender === 'male' ? '男性' : '女性'} No.${res.participantNumber} をチェックインしました`);
+    setMessage(`${genderLabel(res.gender)}No.${res.participantNumber} をチェックインしました`);
   });
 
   const withdraw = (row: RosterRow, withdrawn: boolean) => run(async () => {
@@ -169,8 +181,16 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
       gender: row.gender, participantNumber: row.number, withdrawn,
     }, token);
   }, withdrawn
-    ? '辞退（欠席・途中退席）にします。この方は一覧に表示されず、マッチングの対象外になります。よろしいですか？'
+    ? (isCheckinOnly
+      ? '辞退（欠席・途中退席）にします。受付人数から外れます。よろしいですか？'
+      : '辞退（欠席・途中退席）にします。この方は一覧に表示されず、マッチングの対象外になります。よろしいですか？')
     : '辞退を取り消して、参加中に戻します。よろしいですか？');
+
+  // 受付のみイベントの終了。人数だけの統計を残して終了状態にする（以後は消去のみ）
+  const finishCheckin = () => run(async () => {
+    const { error } = await supabase.rpc('finish_checkin_event', { p_event_id: eventId });
+    if (error) throw error;
+  }, `受付を終了します（受付済み ${progress?.checkedIn ?? 0} 名）。終了後は新たにチェックインできません。よろしいですか？`);
 
   // profileFields が null の間は「全項目有効」の意味。個別に外した時点で明示リストに切り替える
   const activeFields = profileFields ?? PROFILE_FIELDS.map((f) => f.key);
@@ -200,7 +220,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   };
 
   /** 「男 2、3　女 1」の形にする。会場でそのまま読み上げられる並びにしておく */
-  const numbersText = (list: PendingVoter[]) => {
+  const numbersText = (list: (PendingVoter | { gender: Gender; number: number })[]) => {
     const male = list.filter((p) => p.gender === 'male').map((p) => p.number).join('、');
     const female = list.filter((p) => p.gender === 'female').map((p) => p.number).join('、');
     return [male && `男 ${male}`, female && `女 ${female}`].filter(Boolean).join('　');
@@ -265,9 +285,13 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <h1 style={{ margin: 0 }}>イベント進行</h1>
         {/* ★確定操作を挟まず常時見える位置に出す。あとから「どちらの方式で確定したか忘れる」事故を防ぐため */}
-        <span className={`my-number ${matchingMode === 'greedy_priority' ? 'female' : 'male'}`}>
-          マッチング方式: {matchingMode === 'greedy_priority' ? '第1希望優先' : '最大組数'}
-        </span>
+        {isCheckinOnly ? (
+          <span className="my-number">受付のみ</span>
+        ) : (
+          <span className={`my-number ${matchingMode === 'greedy_priority' ? 'female' : 'male'}`}>
+            マッチング方式: {matchingMode === 'greedy_priority' ? '第1希望優先' : '最大組数'}
+          </span>
+        )}
       </div>
       {message && <div className="error" style={{ margin: '12px 0' }}>{message}</div>}
 
@@ -275,12 +299,46 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         <h2 style={{ marginTop: 0 }}>進行ステップ</h2>
         {progress ? (
           <p className="muted" style={{ marginTop: 0 }}>
-            受付済み <strong>{progress.checkedIn}</strong>名（男性 {progress.male} / 女性 {progress.female}）
+            受付済み <strong>{progress.checkedIn}</strong>
+            {isCheckinOnly
+              ? <> / {progress.invited - progress.withdrawn}名</>
+              : <>名（男性 {progress.male} / 女性 {progress.female}）</>}
             {progress.withdrawn > 0 && <>・辞退 {progress.withdrawn}名</>}
             <br />5秒ごとに自動更新されます（再読み込みは不要です）。
           </p>
         ) : <p className="muted" style={{ marginTop: 0 }}>読み込み中…</p>}
 
+        {isCheckinOnly ? (
+          <div className="steps">
+            {renderStep({
+              phaseKey: 'checkin',
+              label: '① 受付開始',
+              hint: '会場のQR・代理チェックインで受付できるようになります',
+              count: progress ? badge(progress.checkedIn, progress.invited - progress.withdrawn) : undefined,
+              alert: notArrived.length > 0 ? `未受付 ${notArrived.length}名（${notArrivedCodes}）` : undefined,
+              onClick: () => kick('checkin'),
+            })}
+
+            {renderStep({
+              phaseKey: 'result',
+              label: '② 受付を終了する',
+              hint: '受付人数を確定します。終了後はチェックインできません',
+              className: phase === 'checkin' ? 'primary' : '',
+              onClick: finishCheckin,
+            })}
+
+            {renderStep({
+              phaseKey: 'purged',
+              label: '③ データを今すぐ消去',
+              hint: '受付終了30分後には自動でも消去されます',
+              className: phase === 'result' || phase === 'purged' ? 'danger' : '',
+              onClick: () => run(
+                () => purgeEvent(eventId, token),
+                '参加者の受付データを今すぐ消去します。よろしいですか？',
+              ),
+            })}
+          </div>
+        ) : (
         <div className="steps">
           {renderStep({
             phaseKey: 'checkin',
@@ -387,7 +445,22 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
             ),
           })}
         </div>
+        )}
       </div>
+
+      {/* 受付のみ（無料）は、マッチング機能つきイベントへの導入口として提供している */}
+      {isCheckinOnly && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>交流会・婚活イベントもこのまま運営できます</h2>
+          <p className="muted" style={{ marginBottom: 12 }}>
+            「マッチングあり」で作成すると、今の受付に加えて、参加者どうしの好印象の送信・最終希望の投票・
+            カップル成立の自動集計と発表までをスマホだけで行えます。紙の集計や読み上げミスがなくなります。
+          </p>
+          <Link href="/organizer" className="btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+            マッチングありのイベントを作成する
+          </Link>
+        </div>
+      )}
 
       {pairs.length > 0 && (
         <div className="card">
@@ -411,7 +484,9 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         <h2 style={{ marginTop: 0 }}>準備1: 枠を発行する（申し込みを受けたら）</h2>
         <p className="muted">
           申し込み人数ぶんの枠をまとめて発行します。1枠につき受付コードが1つ発行されます。
-          コードは先頭1桁が性別（1=男性 / 2=女性）、続く2桁が登録順です。
+          {isCheckinOnly
+            ? '発行した受付コードを、申し込み者にメール等でお知らせください。当日の飛び込み参加の方も、ここで1枠発行して代理チェックインできます。'
+            : 'コードは先頭1桁が性別（1=男性 / 2=女性）、続く2桁が登録順です。'}
         </p>
         <label htmlFor="issueCount">まとめて発行する人数</label>
         <input
@@ -424,8 +499,14 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
           onChange={(e) => setIssueCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
         />
         <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-          <button type="button" disabled={busy} onClick={() => issue('male')}>男性の枠を{issueCount}件発行</button>
-          <button type="button" disabled={busy} onClick={() => issue('female')}>女性の枠を{issueCount}件発行</button>
+          {isCheckinOnly ? (
+            <button type="button" disabled={busy} onClick={() => issue('none')}>参加者の枠を{issueCount}件発行</button>
+          ) : (
+            <>
+              <button type="button" disabled={busy} onClick={() => issue('male')}>男性の枠を{issueCount}件発行</button>
+              <button type="button" disabled={busy} onClick={() => issue('female')}>女性の枠を{issueCount}件発行</button>
+            </>
+          )}
           {isDemo && (
             <button type="button" disabled={busy}
               onClick={() => run(async () => {
@@ -437,7 +518,8 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         </div>
       </div>
 
-      {prelinkUrl && (
+      {/* 事前リンクはプロフィール入力専用。受付のみイベントにはプロフィールが無いので出さない */}
+      {prelinkUrl && !isCheckinOnly && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>準備2: 事前案内を送る（全員に同じリンク）</h2>
           <p className="muted">
@@ -484,7 +566,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
           </div>
           <p className="muted">
             読み取ると受付コードの入力画面が開き、入力した時点でチェックイン（出席登録・番号確定）が完了します。
-            <br />先に「① 参加者登録」を押しておいてください。押していないと番号が出ません。
+            <br />先に「{isCheckinOnly ? '① 受付開始' : '① 参加者登録'}」を押しておいてください。押していないと番号が出ません。
           </p>
           <button type="button" onClick={() => setShowVenueQr((v) => !v)}>
             {showVenueQr ? '掲示用QRを隠す' : '掲示用QRを表示する'}
@@ -503,15 +585,19 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
       <div className="card">
         <h2 style={{ marginTop: 0 }}>会場到着チェックイン（代理）</h2>
         <p className="muted">
-          プロフィールは事前入力済みでも、会場到着チェックインは別操作です（「① 参加者登録」が必要）。
-          参加者本人のスマホ操作が難しい場合、受付コードを聞き取って代わりにチェックインできます。
+          {isCheckinOnly
+            ? 'スマホをお持ちでない方や操作が難しい方は、受付コードを聞き取って代わりにチェックインできます（「① 受付開始」が必要）。'
+            : <>
+              プロフィールは事前入力済みでも、会場到着チェックインは別操作です（「① 参加者登録」が必要）。
+              参加者本人のスマホ操作が難しい場合、受付コードを聞き取って代わりにチェックインできます。
+            </>}
         </p>
         <label htmlFor="manualCode">受付コード</label>
         <input
           id="manualCode"
           inputMode="numeric"
           maxLength={7}
-          placeholder="1010473"
+          placeholder={isCheckinOnly ? '3010473' : '1010473'}
           value={manualCode}
           onChange={(e) => setManualCode(e.target.value.replace(/[^0-9]/g, ''))}
         />
@@ -521,6 +607,7 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
         </button>
       </div>
 
+      {!isCheckinOnly && (
       <div className="card">
         <h2 style={{ marginTop: 0 }}>プロフィール項目</h2>
         <p className="muted">参加者に聞く項目を選べます（選択肢の中身は固定です）。</p>
@@ -543,28 +630,40 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
           ))}
         </div>
       </div>
+      )}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>参加者</h2>
         <p className="muted">
-          △ 未受付 ／ ○ 受付済（プロフ未入力）／ ◎ 受付済・プロフ入力済 ／ × 辞退
+          {isCheckinOnly
+            ? '△ 未受付 ／ ○ 受付済 ／ × 辞退'
+            : '△ 未受付 ／ ○ 受付済（プロフ未入力）／ ◎ 受付済・プロフ入力済 ／ × 辞退'}
           <br />
-          「辞退」は欠席連絡や途中退席のときに使います。押すと一覧から外れ、マッチングの対象外になります。
+          {isCheckinOnly
+            ? '「辞退」は欠席連絡や途中退席のときに使います。押すと受付人数から外れます。'
+            : '「辞退」は欠席連絡や途中退席のときに使います。押すと一覧から外れ、マッチングの対象外になります。'}
         </p>
         <table>
           <thead>
-            <tr><th>状態</th><th>性別</th><th>No.</th><th>受付コード</th><th>ニックネーム</th><th /></tr>
+            <tr>
+              <th>状態</th>
+              {!isCheckinOnly && <th>性別</th>}
+              <th>No.</th>
+              <th>受付コード</th>
+              {!isCheckinOnly && <th>ニックネーム</th>}
+              <th />
+            </tr>
           </thead>
           <tbody>
             {roster.map((row, index) => {
-              const { mark, label } = statusMark(row);
+              const { mark, label } = statusMark(row, isCheckinOnly);
               return (
                 <tr key={`${row.gender}-${row.claimCode ?? row.number ?? index}`}>
                   <td><span className="state-mark" title={label}>{mark}</span></td>
-                  <td>{row.gender === 'male' ? '男' : '女'}</td>
+                  {!isCheckinOnly && <td>{row.gender === 'male' ? '男' : '女'}</td>}
                   <td>{row.number ?? '—'}</td>
                   <td>{row.claimCode ?? '—'}</td>
-                  <td>{row.nickname ?? '—'}</td>
+                  {!isCheckinOnly && <td>{row.nickname ?? '—'}</td>}
                   <td>
                     <button type="button" className="inline" disabled={busy}
                       onClick={() => withdraw(row, row.status !== 'withdrawn')}>

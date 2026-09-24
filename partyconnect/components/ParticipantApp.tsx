@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ApiError, checkin, getResult, listParticipants, submitVote,
-  type Branding, type ListResult, type ResultPayload,
+  type Branding, type EventMode, type Gender, type ListResult, type ResultPayload,
 } from '../lib/api';
 import { watchPhase } from '../lib/phase';
 import {
@@ -17,13 +17,14 @@ import ResultScreen from './ResultScreen';
 
 interface Me {
   eventId: string;
-  gender: 'male' | 'female';
+  gender: Gender;
   // null = まだ会場到着チェックインが済んでいない（事前入力のみ）
   participantNumber: number | null;
   nickname: string | null;
   profileData: Record<string, string | string[]>;
   freeText: string | null;
   enabledProfileFields: string[] | null;
+  eventMode: EventMode;
 }
 
 const LIST_PHASES = ['browse', 'like_vote', 'like_reveal', 'final_vote', 'calculating', 'result'];
@@ -69,6 +70,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
         profileData: res.profileData ?? {},
         freeText: res.freeText,
         enabledProfileFields: res.enabledProfileFields,
+        eventMode: res.eventMode,
       });
       // 番号未確定 = まだ会場でチェックインしていない。事前入力の案内へ
       setStep(res.participantNumber === null ? 'arrive' : 'number');
@@ -122,7 +124,8 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
   }, [sessionToken]);
 
   useEffect(() => {
-    if (!me || !LIST_PHASES.includes(phase)) return;
+    // 受付のみイベントは一覧・投票を持たない（終了時の phase='result' でも一覧を取りに行かない）
+    if (!me || me.eventMode === 'checkin_only' || !LIST_PHASES.includes(phase)) return;
     // プロフィール編集中は画面を奪わない（フェーズが進んでも入力を消さない）
     if (step !== 'event' && step !== 'profile') setStep('event');
     void refreshList();
@@ -134,9 +137,10 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
   }, [me, phase, refreshList, step]);
 
   useEffect(() => {
-    if (!sessionToken || (phase !== 'result' && phase !== 'purged')) return;
+    if (!sessionToken || !me || me.eventMode === 'checkin_only') return;
+    if (phase !== 'result' && phase !== 'purged') return;
     void getResult(sessionToken).then(setResult).catch(() => setResult(null));
-  }, [sessionToken, phase]);
+  }, [sessionToken, me, phase]);
 
   // データ消去まで進んだら、端末に残したメモと下書きもここで消す
   useEffect(() => {
@@ -229,6 +233,42 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
       </main>
     );
   }
+
+  // 受付のみのイベント。受付完了の表示だけで終わり、プロフィール入力や投票の画面には進まない
+  if (me.eventMode === 'checkin_only') {
+    return (
+      <main>
+        <BrandBar branding={branding} />
+        {phase === 'purged' ? (
+          <div className="card">
+            <p style={{ margin: 0 }}>このイベントは終了しました。ご参加ありがとうございました。</p>
+          </div>
+        ) : me.participantNumber === null ? (
+          <div className="card">
+            <h1>まだ受付前です</h1>
+            <p style={{ marginBottom: 0 }}>
+              会場に掲示されているQRコードを読み取り、受付コードを入力してください。
+              読み取れない場合は、受付スタッフに受付コードをお伝えください。
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="big-number">
+              <div className="label">受付完了</div>
+              <div className="value">No.{me.participantNumber}</div>
+            </div>
+            <p className="muted" style={{ textAlign: 'center' }}>
+              受付が完了しました。スタッフから確認された際はこの画面をお見せください。
+              <br />画面を閉じても番号は残ります。
+            </p>
+          </>
+        )}
+      </main>
+    );
+  }
+
+  // マッチングありのイベントの参加者は必ず male / female（issue_participant_slot が保証）
+  const selfGender = me.gender as 'male' | 'female';
 
   if (step === 'arrive') {
     return (
@@ -377,7 +417,7 @@ export default function ParticipantApp({ tokenFromUrl }: { tokenFromUrl: string 
       {list && (
         <PersonList
           participants={list.participants}
-          selfGender={me.gender}
+          selfGender={selfGender}
           mode={mode}
           selected={selected}
           onToggle={toggle}

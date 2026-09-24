@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: event, error: eventError } = await db
-      .from('events').select('profile_field_keys, organizer_id').eq('id', found.event_id).single();
+      .from('events').select('profile_field_keys, organizer_id, event_mode').eq('id', found.event_id).single();
     if (eventError) throw eventError;
 
     // 保存済みのプロフィールを返す。返さないと、別端末やキャッシュ削除のあとに
@@ -128,6 +128,8 @@ Deno.serve(async (req) => {
       profileData: found.profile_data ?? {},
       freeText: await decryptOptional(found.free_text, dataKey),
       enabledProfileFields: (event as { profile_field_keys: string[] | null }).profile_field_keys,
+      // 'checkin_only' のとき参加者画面は受付完了表示だけを出す（投票画面へは進まない）
+      eventMode: (event as { event_mode: string }).event_mode,
       branding: {
         companyName: organizer?.company_name ?? null,
         brandColor: organizer?.brand_color ?? null,
