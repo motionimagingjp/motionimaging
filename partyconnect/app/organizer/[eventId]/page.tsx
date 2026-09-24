@@ -283,16 +283,13 @@ export default function EventConsole({ params }: { params: Promise<{ eventId: st
   return (
     <main>
       {/* ★イベント種別は作成時に固定され、あとから変更できない（DB側でも投票フェーズ等への
-          移行を拒否している）。ここでは「今どちらのシステムで動いているか」を一番上で
-          常に分かるようにするための表示で、押しても切り替わらない（disabled）。
-          切り替えたい場合は主催者コンソールから新しいイベントを作る */}
+          移行を拒否している）。選ばれていない方はグレーアウトして「押せない」ことを見た目でも
+          伝える。切り替えたい場合は主催者コンソールから新しいイベントを作る */}
       <div className="tabs" style={{ marginBottom: 4 }}>
-        {/* onClickを持たせず見た目だけの表示にする（disabledにすると薄く見えて
-            「今どちらのモードか」が逆にわかりにくくなるため、押せないが濃い表示のままにする） */}
-        <button type="button" aria-pressed={isCheckinOnly} style={{ cursor: 'default' }} tabIndex={-1}>
+        <button type="button" aria-pressed={isCheckinOnly} disabled={!isCheckinOnly} tabIndex={-1}>
           受付のみ
         </button>
-        <button type="button" aria-pressed={!isCheckinOnly} style={{ cursor: 'default' }} tabIndex={-1}>
+        <button type="button" aria-pressed={!isCheckinOnly} disabled={isCheckinOnly} tabIndex={-1}>
           マッチングあり
         </button>
       </div>
