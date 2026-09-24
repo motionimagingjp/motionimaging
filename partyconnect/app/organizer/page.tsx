@@ -312,6 +312,13 @@ export default function OrganizerHome() {
         {message && <div className="error" style={{ marginTop: 12 }}>{message}</div>}
       </div>
 
+      <div style={{ textAlign: 'center', margin: '4px 0 20px', color: 'var(--accent)' }}>
+        <div style={{ fontSize: 28, lineHeight: 1 }}>↓</div>
+        <p className="muted" style={{ margin: '4px 0 0' }}>
+          作成したイベントは下の一覧に追加されます。タップして開いてください
+        </p>
+      </div>
+
       <h2>イベント一覧</h2>
       {events.length === 0 && <p className="muted">まだイベントがありません。</p>}
       {events.map((event) => (
