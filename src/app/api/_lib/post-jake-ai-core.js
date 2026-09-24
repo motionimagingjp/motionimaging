@@ -342,7 +342,8 @@ function buildPhotoUrl(index) {
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
   const num    = String(IMAGE_CATEGORY.startNum + index).padStart(5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${IMAGE_CATEGORY.path}/${IMAGE_CATEGORY.prefix}${num}${IMAGE_CATEGORY.ext}`;
+  // 画像の実体は src/app/api/post-images/ 配下（2026-09-24にapp/から移動）
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${IMAGE_CATEGORY.path}/${IMAGE_CATEGORY.prefix}${num}${IMAGE_CATEGORY.ext}`;
 }
 
 function photoFileName(index) {

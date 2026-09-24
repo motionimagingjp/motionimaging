@@ -303,7 +303,10 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(cat.pad || 5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}${cat.ext || '.jpg'}`;
+  // 画像の実体は src/app/api/post-images/ 配下。リポジトリ構成を変えたら
+  // このパスも必ず合わせること（2026-09-24にapp/→src/app/へ移動した際、
+  // ここが旧パスのまま残り全カテゴリの画像添付が無言で404になった）。
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${category}/${cat.prefix}${num}${cat.ext || '.jpg'}`;
 }
 
 async function getNextPhotoIndex(category) {

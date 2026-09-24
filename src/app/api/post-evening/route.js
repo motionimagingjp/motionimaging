@@ -331,7 +331,8 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
+  // 画像の実体は src/app/api/post-images/ 配下（2026-09-24にapp/から移動）
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
 }
 
 async function getNextPhotoIndex(category) {
