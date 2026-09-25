@@ -12,6 +12,10 @@ export default function Home() {
             <div style={{ fontSize: '18px', fontWeight: 500, marginBottom: '4px' }}>🌸 ミゴロンナビ</div>
             <div style={{ fontSize: '13px', color: '#888' }}>お花見・花スポット検索 / ミゴロン指数でおすすめ提案</div>
           </a>
+          <a href="https://scad-partyconnect.vercel.app/" style={{ display: 'block', padding: '20px', background: '#fff', borderRadius: '12px', border: '0.5px solid rgba(0,0,0,0.08)', textDecoration: 'none', color: '#333' }}>
+            <div style={{ fontSize: '18px', fontWeight: 500, marginBottom: '4px' }}>🎉 SCADコネクト</div>
+            <div style={{ fontSize: '13px', color: '#888' }}>街コン・イベントの受付〜マッチング運営システム</div>
+          </a>
         </div>
       </div>
     </main>
