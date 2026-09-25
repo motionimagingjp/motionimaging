@@ -78,6 +78,26 @@ export default function MigoronNavi() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [now] = useState(new Date());
+  const [shareMsg, setShareMsg] = useState('');
+
+  const handleShare = async () => {
+    const shareData = {
+      title: 'パステル花予報 ミゴロンナビ',
+      text: '今、行くべきお花見スポットをミゴロン指数でチェック!',
+      url: typeof window !== 'undefined' ? window.location.href : '',
+    };
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share(shareData);
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareData.url);
+        setShareMsg('リンクをコピーしました');
+        setTimeout(() => setShareMsg(''), 2000);
+      }
+    } catch (e) {
+      // ユーザーによるキャンセルなどは無視
+    }
+  };
 
   const getTargetDate = (w) => {
     const d = new Date(now);
@@ -179,10 +199,46 @@ export default function MigoronNavi() {
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--mn-accent)' }}></span>
               パステル花予報 ミゴロンナビ
             </div>
-            <div style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '999px', background: 'rgba(255,255,255,0.85)', color: 'var(--mn-ink)' }}>
-              {theme.label} · {targetMonth}月
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '999px', background: 'rgba(255,255,255,0.85)', color: 'var(--mn-ink)' }}>
+                {theme.label} · {targetMonth}月
+              </div>
+              <button
+                onClick={handleShare}
+                aria-label="シェア"
+                title="シェア"
+                style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.85)', color: 'var(--mn-ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="18" cy="5" r="3" />
+                  <circle cx="6" cy="12" r="3" />
+                  <circle cx="18" cy="19" r="3" />
+                  <line x1="8.6" y1="10.5" x2="15.4" y2="6.5" />
+                  <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" />
+                </svg>
+              </button>
+              <a
+                href="https://motion-imaging-lab.vercel.app/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="MOTIONIMAGINGLABへ"
+                title="MOTIONIMAGINGLAB"
+                style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255,255,255,0.85)', color: 'var(--mn-ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', flexShrink: 0 }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="11" x2="12" y2="16" />
+                  <circle cx="12" cy="7.5" r="0.5" fill="currentColor" stroke="none" />
+                </svg>
+              </a>
             </div>
           </div>
+
+          {shareMsg && (
+            <div style={{ fontSize: '11px', textAlign: 'right', color: 'var(--mn-ink-soft)', marginTop: '-6px', marginBottom: '8px', padding: '0 4px' }}>
+              {shareMsg}
+            </div>
+          )}
 
           <div style={{ position: 'relative', height: '140px', borderRadius: '12px', overflow: 'hidden', marginBottom: '14px', background: 'var(--mn-hero-bg)' }}>
             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 380 140" preserveAspectRatio="xMidYMid slice" dangerouslySetInnerHTML={{ __html: heroScenes[seasonKey(targetMonth)] }} />
