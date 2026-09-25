@@ -1,13 +1,19 @@
-const PROFILE_ICON = 'https://scad-beauty.vercel.app/profile-avatar.jpg';
+import { SHARED_ABOUT } from '../../lib/shared-about-data';
 
-const SERIES_APPS = [
-  { emoji: '🌸', label: 'ミゴロンナビ', sub: '花見・花スポット検索', kind: 'internal', url: '/migoron' },
-  { emoji: '💬', label: 'SCAD CHAT', sub: '恋活・婚活AIチャット', kind: 'external', url: 'https://scad-chat.vercel.app' },
-  { emoji: '✂️', label: 'SCAD BEAUTY', sub: 'ヘアスタイル・ファッション診断', kind: 'external', url: 'https://scad-beauty.vercel.app' },
-  { emoji: '🎉', label: 'SCADコネクト', sub: '街コン運営システム', kind: 'external', url: 'https://scad-partyconnect.vercel.app/' },
-];
+const SNS_ICON = {
+  instagram: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="20" height="20" rx="5" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="12" r="4.5" stroke="currentColor" strokeWidth="2" />
+      <circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" />
+    </svg>
+  ),
+  x: <span style={{ fontSize: '15px', fontWeight: 'bold' }}>𝕏</span>,
+};
 
 export default function About() {
+  const { me, apps, sns } = SHARED_ABOUT;
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -40,12 +46,12 @@ export default function About() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '13px', marginBottom: '26px' }}>
           <img
-            src={PROFILE_ICON}
+            src="https://scad-beauty.vercel.app/profile-avatar.jpg"
             alt=""
             style={{ width: '60px', height: '60px', borderRadius: '50%', flexShrink: 0, objectFit: 'cover' }}
           />
           <div>
-            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#1a1a1a' }}>はじめまして</div>
+            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#1a1a1a' }}>{me.name}</div>
             <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '3px', lineHeight: '1.7' }}>
               日々の暮らしをちょっと楽しくするWebアプリを、個人で作っています。
             </div>
@@ -58,7 +64,7 @@ export default function About() {
           borderRadius: '4px', padding: '14px 16px',
           fontSize: '13.5px', color: '#333', lineHeight: '2', marginBottom: '16px',
         }}>
-          空いた時間で「あったら便利・楽しい」と思ったWebアプリを、企画からリリースまで一人で手がけています。MOTION IMAGINGは、そうして生まれたアプリをまとめて公開している場所です。
+          {me.text}MOTION IMAGINGは、そうして生まれたアプリをまとめて公開している場所です。
         </div>
 
         <div style={{ fontSize: '12px', color: '#3B6D11', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>このサイトについて</div>
@@ -67,7 +73,7 @@ export default function About() {
           borderRadius: '4px', padding: '14px 16px',
           fontSize: '13.5px', color: '#333', lineHeight: '2', marginBottom: '28px',
         }}>
-          MOTION IMAGINGでは「MOTION IMAGINGシリーズ」として、恋活・婚活のAIチャット「SCAD CHAT」、ヘアスタイル・ファッション診断の「SCAD BEAUTY」、街コン運営を支える「SCADコネクト」、そしてお花見スポットを探せる「ミゴロンナビ」など、複数のWebアプリを展開しています。
+          MOTION IMAGINGでは「MOTION IMAGINGシリーズ」として、恋活・婚活のAIチャット「SCAD CHAT」、パーソナルカラー診断の「イロナビ」、今夜の店探し「ヨイナビ」、街コン運営を支える「SCADコネクト」、そしてお花見スポットを探せる「ミゴロンナビ」など、複数のWebアプリを展開しています。
         </div>
 
         <div style={{ fontSize: '12px', color: '#3B6D11', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>MOTION IMAGINGシリーズ</div>
@@ -76,18 +82,19 @@ export default function About() {
           background: '#fff', borderRadius: '10px',
           padding: '2px 16px', marginBottom: '28px',
         }}>
-          {SERIES_APPS.map((app, i) => {
-            const isExternal = app.kind === 'external';
+          {apps.map((app, i) => {
+            const isInternal = app.id === 'migoron';
+            const href = isInternal ? '/migoron' : app.prodUrl;
             return (
               <a
-                key={i}
-                href={app.url}
-                target={isExternal ? '_blank' : undefined}
-                rel={isExternal ? 'noopener noreferrer' : undefined}
+                key={app.id}
+                href={href}
+                target={isInternal ? undefined : '_blank'}
+                rel={isInternal ? undefined : 'noopener noreferrer'}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '10px',
                   padding: '13px 0',
-                  borderBottom: i < SERIES_APPS.length - 1 ? '1px solid #eee' : 'none',
+                  borderBottom: i < apps.length - 1 ? '1px solid #eee' : 'none',
                   textDecoration: 'none', color: 'inherit', cursor: 'pointer',
                 }}
               >
@@ -97,13 +104,34 @@ export default function About() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
                 }}>{app.emoji}</span>
                 <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: '7px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '13.5px', fontWeight: 'bold', color: '#1a1a1a' }}>{app.label}</span>
+                  <span style={{ fontSize: '13.5px', fontWeight: 'bold', color: '#1a1a1a' }}>{app.name}</span>
                   <span style={{ fontSize: '11.5px', color: '#999' }}>{app.sub}</span>
                 </span>
                 <span style={{ fontSize: '18px', color: '#999', flexShrink: 0 }}>›</span>
               </a>
             );
           })}
+        </div>
+
+        <div style={{ fontSize: '12px', color: '#3B6D11', fontWeight: 'bold', marginBottom: '12px', letterSpacing: '1px' }}>お問い合わせ・SNS</div>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+          {sns.map((s) => (
+            <a
+              key={s.label}
+              href={s.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={s.label}
+              style={{
+                width: '42px', height: '42px', borderRadius: '50%',
+                background: '#fff', border: '1px solid #ddd',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#1a1a1a', textDecoration: 'none',
+              }}
+            >
+              {SNS_ICON[s.icon]}
+            </a>
+          ))}
         </div>
 
         <a href="/" style={{
