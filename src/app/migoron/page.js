@@ -228,6 +228,18 @@ export default function MigoronNavi() {
                   <circle cx="12" cy="7.5" r="0.5" fill="currentColor" stroke="none" />
                 </svg>
               </a>
+              <a
+                href="/about"
+                aria-label="ABOUT"
+                title="ABOUT"
+                style={{ width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, overflow: 'hidden', display: 'block', border: '1px solid rgba(255,255,255,0.9)' }}
+              >
+                <img
+                  src="https://scad-beauty.vercel.app/profile-avatar.jpg"
+                  alt=""
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+              </a>
             </div>
           </div>
 
