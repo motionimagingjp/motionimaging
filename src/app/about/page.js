@@ -2,7 +2,7 @@ const SERIES_APPS = [
   { emoji: '🌸', label: 'ミゴロンナビ', sub: '花見・花スポット検索', kind: 'internal', url: '/migoron' },
   { emoji: '💬', label: 'SCAD CHAT', sub: '恋活・婚活AIチャット', kind: 'external', url: 'https://scad-chat.vercel.app' },
   { emoji: '✂️', label: 'SCAD BEAUTY', sub: 'ヘアスタイル・ファッション診断', kind: 'external', url: 'https://scad-beauty.vercel.app' },
-  { emoji: '🎉', label: 'SCADコネクト', sub: '街コン運営システム', kind: 'external', url: 'https://scad-partyconnect-kappa.vercel.app/' },
+  { emoji: '🎉', label: 'SCADコネクト', sub: '街コン運営システム', kind: 'external', url: 'https://scad-partyconnect.vercel.app/' },
 ];
 
 export default function About() {
