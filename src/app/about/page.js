@@ -1,3 +1,5 @@
+const PROFILE_ICON = 'https://scad-beauty.vercel.app/profile-avatar.jpg';
+
 const SERIES_APPS = [
   { emoji: '🌸', label: 'ミゴロンナビ', sub: '花見・花スポット検索', kind: 'internal', url: '/migoron' },
   { emoji: '💬', label: 'SCAD CHAT', sub: '恋活・婚活AIチャット', kind: 'external', url: 'https://scad-chat.vercel.app' },
@@ -36,11 +38,27 @@ export default function About() {
           textDecoration: 'none', marginBottom: '22px',
         }}>← 閉じる</a>
 
-        <div style={{ marginBottom: '26px' }}>
-          <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#1a1a1a' }}>はじめまして</div>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px', lineHeight: '1.8' }}>
-            MOTION IMAGINGは、日々の暮らしをちょっと楽しくするWebアプリを作って公開しています。
+        <div style={{ display: 'flex', alignItems: 'center', gap: '13px', marginBottom: '26px' }}>
+          <img
+            src={PROFILE_ICON}
+            alt=""
+            style={{ width: '60px', height: '60px', borderRadius: '50%', flexShrink: 0, objectFit: 'cover' }}
+          />
+          <div>
+            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#1a1a1a' }}>はじめまして</div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '3px', lineHeight: '1.7' }}>
+              日々の暮らしをちょっと楽しくするWebアプリを、個人で作っています。
+            </div>
           </div>
+        </div>
+
+        <div style={{ fontSize: '12px', color: '#3B6D11', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>私について</div>
+        <div style={{
+          background: '#fff', borderLeft: '3px solid #3B6D11',
+          borderRadius: '4px', padding: '14px 16px',
+          fontSize: '13.5px', color: '#333', lineHeight: '2', marginBottom: '16px',
+        }}>
+          空いた時間で「あったら便利・楽しい」と思ったWebアプリを、企画からリリースまで一人で手がけています。MOTION IMAGINGは、そうして生まれたアプリをまとめて公開している場所です。
         </div>
 
         <div style={{ fontSize: '12px', color: '#3B6D11', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>このサイトについて</div>
