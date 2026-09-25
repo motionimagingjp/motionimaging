@@ -184,7 +184,7 @@ function buildImageUrl(folderPath, index) {
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
   const paddedIndex = String(index).padStart(2, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-instagram/images/${folderPath}/${paddedIndex}.jpg`;
 }
 
 // 画像が実在するか＆サイズを事前確認

@@ -78,7 +78,7 @@ function buildImageUrl(index) {
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
   const paddedIndex = String(index).padStart(2, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${JAKE_FOLDER_PATH}/${paddedIndex}.jpg`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-instagram/images/${JAKE_FOLDER_PATH}/${paddedIndex}.jpg`;
 }
 
 // ---- 環境変数チェック --------------------------------------
@@ -210,7 +210,7 @@ async function fetchExifCSV() {
   const owner  = process.env.GITHUB_REPO_OWNER;
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
-  const url    = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-instagram/images/${JAKE_FOLDER_PATH}/exif.csv`;
+  const url    = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-instagram/images/${JAKE_FOLDER_PATH}/exif.csv`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`CSV fetch failed: ${res.status} / ${url}`);
   return parseCSV(await res.text());
