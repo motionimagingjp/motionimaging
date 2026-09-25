@@ -3,7 +3,7 @@ const PROFILE_ICON = 'https://scad-beauty.vercel.app/profile-avatar.jpg';
 const SERIES_APPS = [
   { emoji: '🌸', label: 'ミゴロンナビ', sub: '花見・花スポット検索', kind: 'internal', url: '/migoron' },
   { emoji: '💬', label: 'SCAD CHAT', sub: '恋活・婚活AIチャット', kind: 'external', url: 'https://scad-chat.vercel.app' },
-  { emoji: '✂️', label: 'SCAD BEAUTY', sub: 'ヘアスタイル・ファッション診断', kind: 'external', url: 'https://scad-beauty.vercel.app' },
+  { emoji: '✂️', label: 'イロナビ', sub: 'パーソナルカラー診断', kind: 'external', url: 'https://scad-beauty.vercel.app' },
   { emoji: '🎉', label: 'SCADコネクト', sub: '街コン運営システム', kind: 'external', url: 'https://scad-partyconnect.vercel.app/' },
 ];
 
@@ -67,7 +67,7 @@ export default function About() {
           borderRadius: '4px', padding: '14px 16px',
           fontSize: '13.5px', color: '#333', lineHeight: '2', marginBottom: '28px',
         }}>
-          MOTION IMAGINGでは「MOTION IMAGINGシリーズ」として、恋活・婚活のAIチャット「SCAD CHAT」、ヘアスタイル・ファッション診断の「SCAD BEAUTY」、街コン運営を支える「SCADコネクト」、そしてお花見スポットを探せる「ミゴロンナビ」など、複数のWebアプリを展開しています。
+          MOTION IMAGINGでは「MOTION IMAGINGシリーズ」として、恋活・婚活のAIチャット「SCAD CHAT」、パーソナルカラー診断の「イロナビ」、街コン運営を支える「SCADコネクト」、そしてお花見スポットを探せる「ミゴロンナビ」など、複数のWebアプリを展開しています。
         </div>
 
         <div style={{ fontSize: '12px', color: '#3B6D11', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>MOTION IMAGINGシリーズ</div>
