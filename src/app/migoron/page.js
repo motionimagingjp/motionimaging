@@ -200,9 +200,6 @@ export default function MigoronNavi() {
               パステル花予報 ミゴロンナビ
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '999px', background: 'rgba(255,255,255,0.85)', color: 'var(--mn-ink)' }}>
-                {theme.label} · {targetMonth}月
-              </div>
               <button
                 onClick={handleShare}
                 aria-label="シェア"
