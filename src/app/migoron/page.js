@@ -215,6 +215,20 @@ export default function MigoronNavi() {
                 </svg>
               </button>
               <a
+                href="https://motion-imaging-lab.vercel.app/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="MOTIONIMAGINGLABへ"
+                title="MOTIONIMAGINGLAB"
+                style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255,255,255,0.85)', color: 'var(--mn-ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', flexShrink: 0 }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="11" x2="12" y2="16" />
+                  <circle cx="12" cy="7.5" r="0.5" fill="currentColor" stroke="none" />
+                </svg>
+              </a>
+              <a
                 href="/about"
                 aria-label="ABOUT"
                 title="ABOUT"
