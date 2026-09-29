@@ -38,6 +38,7 @@
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
@@ -628,6 +629,10 @@ export async function GET(request) {
     report.finishedAt = new Date().toISOString();
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_morning', {
+      main: { 'X 花畑指数': report.x.flower_ja },
+      sub:  { Threads: report.threads.flower_ja, 画像: report.flower_ja_image },
+    });
     return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
       status: 200, headers: jsonHeaders,
     });
@@ -639,6 +644,7 @@ export async function GET(request) {
     // 当日中の再実行をブロックしたままにしない
     if (claimedToday) { try { await redis.del('morning_posted_date'); } catch {} }
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_morning', { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), {
       status: 500, headers: jsonHeaders,
     });

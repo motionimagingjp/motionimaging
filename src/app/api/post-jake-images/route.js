@@ -15,6 +15,7 @@
 // ※ Redisフラグは元から投稿成功後に更新されているため順序変更なし
 // ============================================================
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
@@ -552,12 +553,15 @@ export async function GET(request) {
 
     // ---- 10) Threads（ベストエフォート） ----
     let threadsId = null;
+    let threadsResult = 'skip（トークン未設定）';
     try {
       threadsId = await postToThreads(process.env.THREADS_JAKE_TOKEN, imageUrl, buildThreadsText(caption));
-      if (threadsId) step('Threads投稿', `成功 ${threadsId}`);
+      if (threadsId) { threadsResult = 'ok'; step('Threads投稿', `成功 ${threadsId}`); }
     } catch (e) {
+      threadsResult = 'error: ' + e.message;
       step('Threads投稿', '失敗（IGには影響なし）: ' + e.message);
     }
+    await recordJobStatus('ig_jake', { main: { Instagram: 'ok' }, sub: { Threads: threadsResult } });
 
     return new Response(JSON.stringify({
       message: 'Success',
@@ -571,6 +575,7 @@ export async function GET(request) {
 
   } catch (error) {
     console.error('ERROR:', error.message, error.stack);
+    await recordJobStatus('ig_jake', { fatalError: error.message });
     return new Response(JSON.stringify({
       error: error.message,
       debug,

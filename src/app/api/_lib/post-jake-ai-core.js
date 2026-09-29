@@ -19,6 +19,7 @@
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 
 import morningData from '../post-jake-ai-morning/tweets.json';
 import nightData from '../post-jake-ai-night/tweets.json';
@@ -497,6 +498,7 @@ export async function runJakeAI(request, slotName) {
     if (w > X_LIMIT) {
       report.result = `文字数超過(${w})のため投稿中止`;
       try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+      await recordJobStatus(`jake_ai_${slotName}`, { main: { X: report.result } });
       return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 500, headers: jsonHeaders });
     }
 
@@ -540,6 +542,13 @@ export async function runJakeAI(request, slotName) {
 
     report.finishedAt = new Date().toISOString();
     try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+    await recordJobStatus(`jake_ai_${slotName}`, {
+      main: { X: report.result },
+      sub: {
+        Threads: report.threads,
+        文章生成: report.dynamicError ? 'error: 生成失敗のため固定文で投稿（' + report.dynamicError + '）' : null,
+      },
+    });
     return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
       status: r.ok || r.duplicate ? 200 : 500,
       headers: jsonHeaders,
@@ -548,6 +557,7 @@ export async function runJakeAI(request, slotName) {
   } catch (error) {
     report.fatalError = error.message;
     try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+    await recordJobStatus(`jake_ai_${slotName}`, { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
 }
@@ -610,6 +620,7 @@ export async function runJakeAIDiary(request) {
 
     if (idx >= DIARY_TOTAL) {
       report.result = '30日分の投稿が完了しています（追加投稿なし）';
+      if (!dryRun) await recordJobStatus('jake_ai_diary', { main: { X: 'skipped' }, note: '30日分の投稿完了' });
       return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
     }
 
@@ -636,6 +647,7 @@ export async function runJakeAIDiary(request) {
     if (w > X_LIMIT) {
       report.result = `文字数超過(${w})のため投稿中止`;
       try { await redis.set(DIARY_REPORT_KEY, JSON.stringify(report)); } catch {}
+      await recordJobStatus('jake_ai_diary', { main: { X: report.result } });
       return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 500, headers: jsonHeaders });
     }
 
@@ -682,6 +694,10 @@ export async function runJakeAIDiary(request) {
 
     report.finishedAt = new Date().toISOString();
     try { await redis.set(DIARY_REPORT_KEY, JSON.stringify(report)); } catch {}
+    await recordJobStatus('jake_ai_diary', {
+      main: { X: report.result },
+      sub:  { Threads: report.threads, 画像: report.image },
+    });
     return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
       status: r.ok || r.duplicate ? 200 : 500,
       headers: jsonHeaders,
@@ -690,6 +706,7 @@ export async function runJakeAIDiary(request) {
   } catch (error) {
     report.fatalError = error.message;
     try { await redis.set(DIARY_REPORT_KEY, JSON.stringify(report)); } catch {}
+    await recordJobStatus('jake_ai_diary', { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
 }

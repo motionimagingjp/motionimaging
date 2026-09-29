@@ -23,6 +23,7 @@
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -542,6 +543,15 @@ export async function GET(request) {
     report.finishedAt = new Date().toISOString();
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_daily_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_daily', {
+      main: { 'X 雲海指数': report.x.cloud_sea, 'X 富士山指数': report.x.fujisan },
+      sub: {
+        'Threads 雲海': report.threads.cloud_sea,
+        'Threads 富士山': report.threads.fujisan,
+        '画像 雲海': report.cloud_sea_image,
+        '画像 富士山': report.fujisan_image,
+      },
+    });
 
     return new Response(JSON.stringify({ message: 'Done', date: dateLabel, weather, report }, null, 2), { status: 200, headers: jsonHeaders });
 
@@ -552,6 +562,7 @@ export async function GET(request) {
     // 当日中の再実行をブロックしたままにしない
     if (claimedToday) { try { await redis.del('daily_posted_date'); } catch {} }
     try { await redis.set('last_daily_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_daily', { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
 }
