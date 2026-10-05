@@ -80,12 +80,16 @@ docs/
 
 ### 自動投稿ルートの共通パターン
 
-複数アカウント対応ルート(スクアド、@jake_images)は`src/app/api/_lib/post-sukuado-core.js` / `post-jake-ai-core.js`に投稿ロジックを集約し、`post-sukuado-morning`等の薄いルートファイルがslot名を渡して`run*()`を呼ぶだけになっている。単一アカウントのルート(`post-daily`、`post-instagram`、`post-evening`、`post-morning-all`)は各ファイル内で完結。共通のヘルパーファイルは無いため、新しいルートを足す際は以下を各ファイルにコピーする形で踏襲する:
+複数アカウント対応ルート(スクアド、@jake_images)は`src/app/api/_lib/post-sukuado-core.js` / `post-jake-ai-core.js`に投稿ロジックを集約し、`post-sukuado-morning`等の薄いルートファイルがslot名を渡して`run*()`を呼ぶだけになっている。単一アカウントのルート(`post-daily`、`post-instagram`、`post-evening`、`post-morning-all`)は各ファイル内で完結。
+
+**稼働状況の記録(必須)**: 全cronルートは実際に投稿を試みた回の結果を`src/lib/job-status.js`の`recordJobStatus()`でRedis(`job_status:<id>`)に記録し、管理画面`/admin`に表示している。新しいcronを足すときは`JOBS`配列に登録し、成功時・失敗時(catch)の両方で`recordJobStatus()`を呼ぶこと(本日投稿済みスキップ・dry runでは呼ばない)。
+
+それ以外の共通ヘルパーは無いため、新しいルートを足す際は以下を各ファイルにコピーする形で踏襲する:
 
 - **Xの重み付き文字数**: 280字制限は重み付きで、CJK(漢字・かな・全角記号)と絵文字は1文字あたり2、URLは実際の長さに関わらず常に23としてカウントされる。各ルートが`weightedLength()` / `clipWeighted()`を個別に実装している(単純な`.length`判定だと日本語ツイートが上限を超えて弾かれる)。全角中心のツイートは実質140字程度が上限。
 - **デバッグ用クエリパラメータ**: `?key=CRON_SECRET`(ブラウザから直接実行する際のクエリ認証)、`?dry=1`(投稿せず本文と重み付き文字数を確認)、`?force=1`(当日の重複チェックを無視)、`?report=1`(前回実行レポートを表示)、`?noimage=1`、`?skip=name,...`。
 - **Redis利用**: 当日重複防止は`SET NX`による原子的な予約、画像ローテーションは投稿成功後にのみindexを進めるカウンタ、@jake_imagesは直近の投稿履歴をプロンプトに渡して同じニュースの繰り返しを避けている。
-- 投稿本文はGemini(`gemini-2.5-flash`)がGoogle検索groundingを使って都度生成する設計。各ルート配下の`tweets.json`/`diary.json`等は立ち上げ用のフォールバック・種データであり、定常運用の本流ではない。
+- 投稿本文の作り方はアカウントで異なる。@jake_images(`post-jake-ai-*`)はGemini(`gemini-2.5-flash`)がGoogle検索groundingを使って都度生成し、`tweets.json`は生成失敗時のフォールバック(`diary.json`の30日振り返りは固定文)。スクアド(`post-sukuado-*`)はGeminiを使わず、各ルートの`tweets.json`をカテゴリが偏らない順番で1日1本ずつ投稿する。ミゴロン(`post-morning-all`/`post-evening`/`post-daily`)は天気データ(open-meteo)をもとに指数を出す。Geminiの出力は例示の丸写しや指数とメモの矛盾を検査し、問題があれば季節別の固定データ・定型文に差し替える(星空指数は指数自体をコードで計算し、Geminiは一言メモのみ)。
 
 `docs/jake_images_ai_trends_plan.md`と`docs/jake_images_x_handover.md`は`@jake_images`アカウント固有の編集方針(投稿頻度、扱う話題の範囲、CTAのローテーション)をまとめている。このアカウントのプロンプトやスケジュールを変更する前に読むこと。
 
@@ -95,6 +99,7 @@ docs/
 
 ## 開発メモ
 
-- `npm install` → `npm run build`でローカルビルド確認可能。`UPSTASH_REDIS_...`未設定の警告は無視してよい(本番はVercel側に設定済み)。
-- `package-lock.json`はリポジトリに含めていない(`.gitignore`対象外だが追跡されていない状態を維持)。`npm install`実行後に誤ってコミットしないこと。
+- `npm install` → `npm run build`でローカルビルド確認可能。`[Upstash Redis] The 'url' property is missing`(`KV_REST_API_URL`/`KV_REST_API_TOKEN`未設定)の警告は無視してよい(本番はVercel側に設定済み)。
+- `package-lock.json`はリポジトリで管理している(2026-09-25追加)。依存を変えたとき以外は差分をコミットしない。
+- 運用手順(投稿一覧・管理画面・画像フォルダ・Metaトークン更新手順・障害記録)は`README.md`にまとめている。
 - ブランチが既にmainにマージ済みで古くなっている場合は`git fetch origin main && git merge-base --is-ancestor HEAD origin/main`で確認し、`git checkout -B <branch> origin/main`で作業ブランチを最新化してから着手する。
