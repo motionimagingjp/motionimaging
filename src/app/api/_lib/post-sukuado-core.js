@@ -24,6 +24,7 @@
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 
 // 朝夜のJSONを静的import（ビルド時に同梱される）
 import morningData from '../post-sukuado-morning/tweets.json';
@@ -212,7 +213,8 @@ function buildPhotoUrl(index) {
   const repo   = process.env.GITHUB_REPO_NAME;
   const branch = process.env.GITHUB_BRANCH || 'main';
   const num    = String(NIGHT_IMAGE.startNum + index).padStart(2, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${NIGHT_IMAGE.path}/${num}${NIGHT_IMAGE.ext}`;
+  // 画像の実体は src/app/api/post-images/ 配下（2026-09-24にapp/から移動）
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${NIGHT_IMAGE.path}/${num}${NIGHT_IMAGE.ext}`;
 }
 
 function photoFileName(index) {
@@ -378,6 +380,7 @@ export async function runSukuado(request, slotName) {
       await redis.set(slot.idxKey, nextIdx);
       report.result = `文字数超過(${w})のためスキップ。次回はorder=${nextIdx}`;
       try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+      await recordJobStatus(`sukuado_${slotName}`, { main: { X: 'skipped' }, sub: { 文字数: report.result } });
       return new Response(JSON.stringify({ message: report.result, report }, null, 2), { status: 200, headers: jsonHeaders });
     }
 
@@ -442,6 +445,10 @@ export async function runSukuado(request, slotName) {
 
     report.finishedAt = new Date().toISOString();
     try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+    await recordJobStatus(`sukuado_${slotName}`, {
+      main: { X: report.result },
+      sub:  { Threads: report.threads, 画像: report.image },
+    });
     return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
       status: r.ok || r.duplicate ? 200 : 500,
       headers: jsonHeaders,
@@ -450,6 +457,7 @@ export async function runSukuado(request, slotName) {
   } catch (error) {
     report.fatalError = error.message;
     try { await redis.set(slot.reportKey, JSON.stringify(report)); } catch {}
+    await recordJobStatus(`sukuado_${slotName}`, { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
 }

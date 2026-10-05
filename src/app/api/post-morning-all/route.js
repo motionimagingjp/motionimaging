@@ -1,5 +1,5 @@
 // app/api/post-morning-all/route.js
-// 朝のX投稿（2本）＋Threads
+// 朝のX投稿（1本）＋Threads
 // ============================================================
 // 2026-07-24 改修版 v3
 // 2026-09-13 英語版（Kanto Bloom Report）の投稿を廃止。日本語の
@@ -7,6 +7,9 @@
 // 2026-09-14 当日重複防止（SET NXによる原子的な予約）を追加。post-daily
 //            で雲海指数が2回投稿された事故と同型の穴がこのファイルにも
 //            あったため（そもそも当日重複チェック自体が無かった）。
+// 2026-09-28 お出かけ開運指数の投稿を廃止。風景写真アカウントの世界観に
+//            合わないため。花畑指数の1本のみに変更（六曜・選日計算も
+//            使用箇所がなくなったため削除）。
 //
 //  ★ 今回の主眼：Xの「重み付き文字数」に対応
 //    Xの280字制限は重み付きで、CJK（漢字・かな・全角記号）と絵文字は
@@ -31,10 +34,11 @@
 //    ?report=1         … 前回の実行レポートを表示（投稿しない）
 //    ?dry=1            … 投稿せず本文と重み付き文字数を確認（重複予約の対象外）
 //    ?force=1          … 当日の重複チェックを無視して強制実行
-//    ?skip=lucky,...   … 個別スキップ
+//    ?skip=flower_ja,... … 個別スキップ
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
@@ -123,120 +127,6 @@ function getSeasonalFlowers() {
 }
 
 // ============================================================
-// 暦
-// ============================================================
-function julianDay(year, month, day) {
-  const a = Math.floor((14 - month) / 12);
-  const y = year + 4800 - a;
-  const m = month + 12 * a - 3;
-  return day + Math.floor((153 * m + 2) / 5) + 365 * y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
-}
-
-// ============================================================
-// 六曜（2026-09 修正）
-//
-//  旧実装は julianDay % 6 で算出していたが根本的に誤り。
-//  六曜は「(旧暦月 + 旧暦日) % 6」で決まり、朔（新月）のたびに
-//  旧暦1日にリセットされる。単純な通日の剰余では朔をまたぐたびに
-//  ズレが発生する。実際 2026/9/11(朔) を境に
-//  9/11「友引→赤口」9/12「先負→先勝」と2日連続で誤投稿していた。
-//
-//  修正版は Meeus の朔時刻計算で直近の新月を求め、
-//  旧暦日・旧暦月を出してから六曜を決定する。
-//  2026/9/10〜9/17 の8日間で暦データと完全一致を確認済み。
-// ============================================================
-const ROKUYO_LIST = ['大安', '赤口', '先勝', '友引', '先負', '仏滅'];
-const NM_ANCHOR_K = 330;   // 2026-09-11 の朔
-const NM_ANCHOR_MONTH = 8; // そのときの旧暦月
-
-function newMoonJde(k) {
-  const rad = Math.PI / 180;
-  const T = k / 1236.85;
-  let jde = 2451550.09766 + 29.530588861 * k
-          + 0.00015437 * T * T - 0.000000150 * Math.pow(T, 3) + 0.00000000073 * Math.pow(T, 4);
-  const E  = 1 - 0.002516 * T - 0.0000074 * T * T;
-  const M  = ((2.5534 + 29.10535670 * k - 0.0000014 * T * T - 0.00000011 * Math.pow(T, 3)) % 360) * rad;
-  const Mp = ((201.5643 + 385.81693528 * k + 0.0107582 * T * T + 0.00001238 * Math.pow(T, 3)) % 360) * rad;
-  const F  = ((160.7108 + 390.67050284 * k - 0.0016118 * T * T - 0.00000227 * Math.pow(T, 3)) % 360) * rad;
-  const O  = ((124.7746 - 1.56375588 * k + 0.0020672 * T * T + 0.00000215 * Math.pow(T, 3)) % 360) * rad;
-
-  jde += -0.40720 * Math.sin(Mp) + 0.17241 * E * Math.sin(M) + 0.01608 * Math.sin(2 * Mp)
-       + 0.01039 * Math.sin(2 * F) + 0.00739 * E * Math.sin(Mp - M) - 0.00514 * E * Math.sin(Mp + M)
-       + 0.00208 * E * E * Math.sin(2 * M) - 0.00111 * Math.sin(Mp - 2 * F) - 0.00057 * Math.sin(Mp + 2 * F)
-       + 0.00056 * E * Math.sin(2 * Mp + M) - 0.00042 * Math.sin(3 * Mp) + 0.00042 * E * Math.sin(M + 2 * F)
-       + 0.00038 * E * Math.sin(M - 2 * F) - 0.00024 * E * Math.sin(2 * Mp - M) - 0.00017 * Math.sin(O)
-       - 0.00007 * Math.sin(Mp + 2 * M);
-
-  const corr = [
-    [0.000325, 299.77,  0.107408, -0.009173], [0.000165, 251.88,  0.016321, 0],
-    [0.000164, 251.83, 26.651886, 0],         [0.000126, 349.42, 36.412478, 0],
-    [0.000110,  84.66, 18.206239, 0],         [0.000062, 141.74, 53.303771, 0],
-    [0.000060, 207.14,  2.453732, 0],         [0.000056, 154.84,  7.306860, 0],
-    [0.000047,  34.52, 27.261239, 0],         [0.000042, 207.19,  0.121824, 0],
-    [0.000040, 291.34,  1.844379, 0],         [0.000037, 161.72, 24.198154, 0],
-    [0.000035, 239.56, 25.513099, 0],         [0.000023, 331.55,  3.592518, 0],
-  ];
-  for (const c of corr) {
-    jde += c[0] * Math.sin((c[1] + c[2] * k + c[3] * T * T) * rad);
-  }
-  return jde;
-}
-
-function newMoonJdnJst(k) {
-  return Math.floor(newMoonJde(k) + 0.5 + 9 / 24);
-}
-
-function getLunarDate(year, month, day) {
-  const jdn = julianDay(year, month, day);
-  const k0 = Math.round((jdn - 2451550.0) / 29.530588861);
-  let bestK = null, bestNm = -Infinity;
-  for (let k = k0 - 2; k <= k0 + 2; k++) {
-    const nm = newMoonJdnJst(k);
-    if (nm <= jdn && nm > bestNm) { bestNm = nm; bestK = k; }
-  }
-  const lunarDay = jdn - bestNm + 1;
-  const lunarMonth = (((bestK - NM_ANCHOR_K + NM_ANCHOR_MONTH - 1) % 12) + 12) % 12 + 1;
-  return { lunarMonth, lunarDay };
-}
-
-function getRokuyo(year, month, day) {
-  const ld = getLunarDate(year, month, day);
-  return ROKUYO_LIST[(ld.lunarMonth + ld.lunarDay) % 6];
-}
-
-function getIchryuManbaibi(year, month, day) {
-  const kanshi = julianDay(year, month, day) % 60;
-  const map = {
-    1:[1,13,25,37,49], 2:[4,16,28,40,52], 3:[7,19,31,43,55],
-    4:[10,22,34,46,58], 5:[1,13,25,37,49], 6:[4,16,28,40,52],
-    7:[7,19,31,43,55], 8:[10,22,34,46,58], 9:[1,13,25,37,49],
-    10:[4,16,28,40,52], 11:[7,19,31,43,55], 12:[10,22,34,46,58],
-  };
-  return (map[month] || []).includes(kanshi);
-}
-
-function getTenshaDay(year, month, day) {
-  const kanshi = julianDay(year, month, day) % 60;
-  const map = {
-    1:[25], 2:[25], 3:[31], 4:[31], 5:[37], 6:[37],
-    7:[43], 8:[43], 9:[49], 10:[49], 11:[55], 12:[55],
-  };
-  return (map[month] || []).includes(kanshi);
-}
-
-function getHoliday(year, month, day) {
-  const h = {
-    '1-1':'元日', '2-11':'建国記念の日', '2-23':'天皇誕生日',
-    '3-20':'春分の日', '4-29':'昭和の日', '5-3':'憲法記念日',
-    '5-4':'みどりの日', '5-5':'こどもの日', '7-15':'海の日',
-    '8-11':'山の日', '9-16':'敬老の日', '9-23':'秋分の日',
-    '10-13':'スポーツの日', '11-3':'文化の日', '11-23':'勤労感謝の日',
-  };
-  return h[month + '-' + day] || null;
-}
-
-
-// ============================================================
 // 季節別スポット（2026-09 追加）
 //
 //  旧実装のフォールバックは「ひたち海浜公園/あしかがフラワーパーク/
@@ -308,19 +198,19 @@ async function getDaytimeWeather() {
     }).map(({ i }) => i);
     const worstCode = Math.max(...dayIndices.map(i => codes[i]));
     const maxTemp   = Math.max(...dayIndices.map(i => temps[i]));
-    let weatherJA, weatherEN, penalty, scoreWeather;
-    if (worstCode === 0)      { weatherJA = '快晴';     weatherEN = 'clear skies';     penalty = 0;  scoreWeather = 100; }
-    else if (worstCode <= 2)  { weatherJA = '晴れ';     weatherEN = 'sunny';           penalty = 0;  scoreWeather = 90;  }
-    else if (worstCode <= 3)  { weatherJA = '曇り';     weatherEN = 'cloudy';          penalty = 10; scoreWeather = 70;  }
-    else if (worstCode <= 49) { weatherJA = '霧';       weatherEN = 'foggy';           penalty = 20; scoreWeather = 50;  }
-    else if (worstCode <= 67) { weatherJA = '雨';       weatherEN = 'rainy';           penalty = 30; scoreWeather = 30;  }
-    else if (worstCode <= 69) { weatherJA = '大雨';     weatherEN = 'heavy rain';      penalty = 40; scoreWeather = 20;  }
-    else if (worstCode <= 79) { weatherJA = '雪';       weatherEN = 'snowy';           penalty = 40; scoreWeather = 20;  }
-    else if (worstCode <= 84) { weatherJA = 'にわか雨'; weatherEN = 'passing showers'; penalty = 20; scoreWeather = 35;  }
-    else                      { weatherJA = '荒天';     weatherEN = 'stormy';          penalty = 50; scoreWeather = 10;  }
-    return { weatherJA, weatherEN, penalty, scoreWeather, max: Math.round(maxTemp) };
+    let weatherJA, weatherEN, penalty;
+    if (worstCode === 0)      { weatherJA = '快晴';     weatherEN = 'clear skies';     penalty = 0;  }
+    else if (worstCode <= 2)  { weatherJA = '晴れ';     weatherEN = 'sunny';           penalty = 0;  }
+    else if (worstCode <= 3)  { weatherJA = '曇り';     weatherEN = 'cloudy';          penalty = 10; }
+    else if (worstCode <= 49) { weatherJA = '霧';       weatherEN = 'foggy';           penalty = 20; }
+    else if (worstCode <= 67) { weatherJA = '雨';       weatherEN = 'rainy';           penalty = 30; }
+    else if (worstCode <= 69) { weatherJA = '大雨';     weatherEN = 'heavy rain';      penalty = 40; }
+    else if (worstCode <= 79) { weatherJA = '雪';       weatherEN = 'snowy';           penalty = 40; }
+    else if (worstCode <= 84) { weatherJA = 'にわか雨'; weatherEN = 'passing showers'; penalty = 20; }
+    else                      { weatherJA = '荒天';     weatherEN = 'stormy';          penalty = 50; }
+    return { weatherJA, weatherEN, penalty, max: Math.round(maxTemp) };
   } catch {
-    return { weatherJA: '晴れ', weatherEN: 'sunny', penalty: 0, scoreWeather: 90, max: '--' };
+    return { weatherJA: '晴れ', weatherEN: 'sunny', penalty: 0, max: '--' };
   }
 }
 
@@ -432,62 +322,6 @@ async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA,
 }
 
 // ============================================================
-// お出かけ開運指数
-// ============================================================
-async function buildLuckyTweet(apiKey, weatherJA, scoreWeather, max) {
-  const jst = new Date(Date.now() + 9 * 3600000);
-  const year  = jst.getUTCFullYear();
-  const month = jst.getUTCMonth() + 1;
-  const day   = jst.getUTCDate();
-  const dow   = ['日', '月', '火', '水', '木', '金', '土'][jst.getUTCDay()];
-  const rokuyo   = getRokuyo(year, month, day);
-  const isIchryu = getIchryuManbaibi(year, month, day);
-  const isTensha = getTenshaDay(year, month, day);
-  const holiday  = getHoliday(year, month, day);
-  let outing = scoreWeather;
-  if (rokuyo === '大安')  outing = Math.min(100, outing + 10);
-  if (rokuyo === '仏滅')  outing = Math.max(10,  outing - 20);
-  if (rokuyo === '赤口')  outing = Math.max(10,  outing - 10);
-  if (isIchryu)           outing = Math.min(100, outing + 10);
-  if (isTensha)           outing = Math.min(100, outing + 15);
-  const senjiList = [];
-  if (isIchryu) senjiList.push('一粒万倍日');
-  if (isTensha) senjiList.push('天赦日');
-  const senjiText = senjiList.length > 0 ? '・' + senjiList.join('・') : '';
-  const dateText = year + '年' + month + '月' + day + '日(' + dow + ')'
-    + (holiday ? '・' + holiday : '')
-    + '・' + rokuyo + senjiText;
-  const hashtag = '#開運 #お出かけ #' + (senjiList[0] || rokuyo);
-
-  let action = '今日も良い一日を！';
-  try {
-    const actionPrompt = 'Output only the final answer in Japanese. No thinking, no explanation, no reasoning.\n'
-      + 'お出かけを促す開運アクションを1文で書いてください。\n'
-      + '六曜：' + rokuyo + '\n'
-      + '天気：東京' + weatherJA + '（最高' + max + '℃）\n'
-      + '選日：' + (senjiText || 'なし') + '\n'
-      + '条件：30文字以内、前向きな内容、文章のみ出力';
-    const raw = await callGemini(apiKey, actionPrompt, 100);
-    if (raw) action = raw.replace(/\n/g, '');
-  } catch { /* フォールバック文を使用 */ }
-
-  const build = (actionW) => {
-    const a = actionW > 0 ? clipWeighted(action, actionW) : '';
-    return '⛩️お出かけ指数' + outing + '％ '
-      + dateText + ' '
-      + '東京' + weatherJA + '（最高' + max + '℃）'
-      + a + ' '
-      + hashtag;
-  };
-
-  for (const w of [70, 56, 40, 24, 0]) {
-    const t = build(w);
-    if (weightedLength(t) <= X_TARGET) return t;
-  }
-  return clipWeighted(build(0), X_LIMIT);
-}
-
-// ============================================================
 // Threads（テキスト・ベストエフォート・タイムアウト付き）
 // ============================================================
 async function postTextToThreads(token, text) {
@@ -578,7 +412,8 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
+  // 画像の実体は src/app/api/post-images/ 配下（2026-09-24にapp/から移動）
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
 }
 
 async function getNextPhotoIndex(category) {
@@ -700,13 +535,11 @@ export async function GET(request) {
 
     const jstNow     = new Date(Date.now() + 9 * 3600000);
     const curMonth   = jstNow.getUTCMonth() + 1;
-    const tweetLucky = await buildLuckyTweet(API_KEY, weather.weatherJA, weather.scoreWeather, weather.max);
     const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weather.weatherJA, weather.penalty, weather.max, curMonth, report);
 
     // 重み付き文字数を必ず記録（超過していれば一目で分かる）
     report.lengths = {
-      lucky:     { weighted: weightedLength(tweetLucky), raw: tweetLucky.length },
-      flower_ja: { weighted: weightedLength(tweetJA),    raw: tweetJA.length },
+      flower_ja: { weighted: weightedLength(tweetJA), raw: tweetJA.length },
       limit: X_LIMIT,
     };
 
@@ -716,8 +549,7 @@ export async function GET(request) {
       return new Response(JSON.stringify({
         message: 'Dry run（投稿していません）',
         tweets: {
-          lucky:     { weighted: weightedLength(tweetLucky), text: tweetLucky },
-          flower_ja: { weighted: weightedLength(tweetJA),    text: tweetJA },
+          flower_ja: { weighted: weightedLength(tweetJA), text: tweetJA },
         },
         report,
       }, null, 2), { status: 200, headers: jsonHeaders });
@@ -733,10 +565,9 @@ export async function GET(request) {
     // 花畑指数（日本語）にだけ、花カテゴリの画像をローテーションで添付する。
     // ?noimage=1 を付けると画像なしでテスト投稿できる（デバッグ用）。
     const noImage = url.searchParams.get('noimage') === '1';
-    const IMAGE_MAP = { flower_ja: 'flower' };  // 将来: lucky等に別カテゴリを足す場合はここに追加
+    const IMAGE_MAP = { flower_ja: 'flower' };
 
     const entries = [
-      ['lucky',     tweetLucky],
       ['flower_ja', tweetJA],
     ];
 
@@ -798,6 +629,10 @@ export async function GET(request) {
     report.finishedAt = new Date().toISOString();
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_morning', {
+      main: { 'X 花畑指数': report.x.flower_ja },
+      sub:  { Threads: report.threads.flower_ja, 画像: report.flower_ja_image },
+    });
     return new Response(JSON.stringify({ message: 'Done', report }, null, 2), {
       status: 200, headers: jsonHeaders,
     });
@@ -809,6 +644,7 @@ export async function GET(request) {
     // 当日中の再実行をブロックしたままにしない
     if (claimedToday) { try { await redis.del('morning_posted_date'); } catch {} }
     try { await redis.set('last_morning_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_morning', { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), {
       status: 500, headers: jsonHeaders,
     });

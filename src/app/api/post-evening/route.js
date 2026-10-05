@@ -21,6 +21,7 @@
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -331,7 +332,8 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
+  // 画像の実体は src/app/api/post-images/ 配下（2026-09-24にapp/から移動）
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${category}/${cat.prefix}${num}.jpg`;
 }
 
 async function getNextPhotoIndex(category) {
@@ -543,6 +545,10 @@ export async function GET(request) {
     report.finishedAt = new Date().toISOString();
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_evening_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_evening', {
+      main: { 'X 星空指数': report.result },
+      sub:  { Threads: report.threads, 画像: report.image },
+    });
 
     return new Response(JSON.stringify({ message: 'Done', report }, null, 2), { status: 200, headers: jsonHeaders });
 
@@ -553,6 +559,7 @@ export async function GET(request) {
     // 当日中の再実行をブロックしたままにしない
     if (claimedToday) { try { await redis.del(todayKey); } catch {} }
     try { await redis.set('last_evening_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_evening', { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
 }

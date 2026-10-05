@@ -23,6 +23,7 @@
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
+import { recordJobStatus } from '../../../lib/job-status';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -303,7 +304,10 @@ function buildPhotoUrl(category, index) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const cat    = IMAGE_CATEGORIES[category];
   const num    = String(cat.startNum + index).padStart(cat.pad || 5, '0');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/app/api/post-images/${category}/${cat.prefix}${num}${cat.ext || '.jpg'}`;
+  // 画像の実体は src/app/api/post-images/ 配下。リポジトリ構成を変えたら
+  // このパスも必ず合わせること（2026-09-24にapp/→src/app/へ移動した際、
+  // ここが旧パスのまま残り全カテゴリの画像添付が無言で404になった）。
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${category}/${cat.prefix}${num}${cat.ext || '.jpg'}`;
 }
 
 async function getNextPhotoIndex(category) {
@@ -539,6 +543,15 @@ export async function GET(request) {
     report.finishedAt = new Date().toISOString();
     report.totalMs = Date.now() - t0;
     try { await redis.set('last_daily_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_daily', {
+      main: { 'X 雲海指数': report.x.cloud_sea, 'X 富士山指数': report.x.fujisan },
+      sub: {
+        'Threads 雲海': report.threads.cloud_sea,
+        'Threads 富士山': report.threads.fujisan,
+        '画像 雲海': report.cloud_sea_image,
+        '画像 富士山': report.fujisan_image,
+      },
+    });
 
     return new Response(JSON.stringify({ message: 'Done', date: dateLabel, weather, report }, null, 2), { status: 200, headers: jsonHeaders });
 
@@ -549,6 +562,7 @@ export async function GET(request) {
     // 当日中の再実行をブロックしたままにしない
     if (claimedToday) { try { await redis.del('daily_posted_date'); } catch {} }
     try { await redis.set('last_daily_report', JSON.stringify(report)); } catch {}
+    await recordJobStatus('x_daily', { fatalError: error.message });
     return new Response(JSON.stringify({ error: error.message, report }, null, 2), { status: 500, headers: jsonHeaders });
   }
 }
