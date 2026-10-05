@@ -5,9 +5,20 @@
 このリポジトリには性質の異なる2つのアプリが同居している。
 
 1. **ルート(`src/app/`)**: motionimaging本体。トップページ + Instagram/X/Threadsへの自動投稿bot群(Vercel Cron)
-2. **`partyconnect/`**: 「SCADコネクト」(旧PartyConnect)。街コンの受付〜マッチング〜データ消去を行う主催者向け進行システム。自己完結しており、そのまま独立リポジトリへ切り出せる構成([詳細](partyconnect/README.md))。内部識別子(ディレクトリ名・DBスキーマ・Cronジョブ名)は`partyconnect`のまま、表示名のみ「SCADコネクト」に改称済み。
+2. **`partyconnect/`**: 「SCADコネクト」(旧PartyConnect)。街コンの受付〜マッチング〜データ消去を行う主催者向け進行システム。自己完結しており、そのまま独立リポジトリへ切り出せる構成([詳細](partyconnect/README.md))。内部識別子(ディレクトリ名・DBスキーマ・Cronジョブ名)は`partyconnect`のまま、表示名のみ「SCADコネクト」に改称済み。完全に別プロジェクト(自前の`package.json`/`next.config.mjs`、別デプロイ先。デプロイ手順は`partyconnect/DEPLOY.md`)なので、ルート側のビルドには含まれない。
 
 MOTIONIMAGING LABは「SCAD」シリーズ(婚活AIチャット「スクアド」、「SCADビューティー」)の親ブランド。
+
+## コマンド
+
+```
+npm run dev     # next dev (http://localhost:3000)
+npm run build   # next build
+npm run start   # next start (本番ビルドの起動確認)
+npm run lint    # next lint
+```
+
+ルート側にテストはない。`partyconnect/`は別プロジェクトとして独自のテストを持つ(`cd partyconnect && npm test`でunit + function + SQLテストを実行)。
 
 ## 重大な注意: `app/`と`src/app/`を絶対に共存させない
 
@@ -22,7 +33,7 @@ MOTIONIMAGING LABは「SCAD」シリーズ(婚活AIチャット「スクアド�
 ```
 src/app/
   page.js, layout.js        トップページ
-  about/                    会社紹介ページ
+  about/                    自己紹介 + MOTION IMAGINGシリーズ(姉妹アプリ)紹介ページ
   migoron/                  みごろん(季節の見頃情報)ページ + 同名API
   admin/                    管理画面。自動投稿の稼働状況・SCADコネクトの利用状況を一覧表示
   api/
@@ -38,6 +49,14 @@ docs/
   jake_images_ai_trends_plan.md, jake_images_x_handover.md, partyconnect_requirements.md
 ```
 
+### ページとmetadataの関係
+
+`src/app/*/page.js`はインタラクティブなため`'use client'`のClient Component。Client Componentは`metadata`をexportできないため、ルートごとのOGP/Twitterカード用metadataは、`children`をそのまま返すだけのServer Component`layout.js`を同階層に置いて定義する(`src/app/migoron/layout.js`が実例)。新しいルートにmetadataを足すときはこのパターンに従うこと。`metadataBase`はルートの`src/app/layout.js`で一度だけ設定している。
+
+### MOTION IMAGINGシリーズ(姉妹アプリ)
+
+`src/app/about/page.js`が「MOTION IMAGINGシリーズ」として姉妹アプリを一覧表示している。いずれも別々にデプロイされたVercelプロジェクト: SCAD CHAT(`scad-chat.vercel.app`)、SCAD BEAUTY(`scad-beauty.vercel.app`)、SCADコネクト(`scad-partyconnect.vercel.app`、`partyconnect/`からビルド)、そしてこのリポジトリ自身のミゴロンナビ。プロフィールアイコンなど一部画像はSCAD BEAUTY(`scad-beauty.vercel.app`)を参照元として共有しており、アプリごとに複製していない。
+
 ## 自動投稿: アカウントと環境変数の対応
 
 | 環境変数 | プラットフォーム | 使用箇所 | アカウント |
@@ -48,15 +67,27 @@ docs/
 | `THREADS_JAKE_TOKEN` | Threads | 同上 | @jake_images_ |
 | `THREADS_SUKUADO_TOKEN` | Threads | `post-sukuado-*`系 | Sukuado |
 | `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` / `X_API_KEY` / `X_API_SECRET` | X | `post-daily`等 | motion |
-| `JAKE_X_ACCESS_TOKEN` / `JAKE_X_ACCESS_SECRET` / `JAKE_X_API_KEY` / `JAKE_X_API_SECRET` | X | `post-jake-ai-*` | jake |
+| `JAKE_X_ACCESS_TOKEN` / `JAKE_X_ACCESS_SECRET` / `JAKE_X_API_KEY` / `JAKE_X_API_SECRET` | X | `post-jake-ai-*` | jake(`JAKE_IMAGES_ACCESS_TOKEN`とは別物) |
 | `SCAD_X_ACCESS_TOKEN` / `SCAD_X_ACCESS_SECRET` / `SCAD_X_API_KEY` / `SCAD_X_API_SECRET` | X | `post-sukuado-*` | SCAD |
 | `GEMINI_API_KEY` | Gemini | キャプション生成全般(共通) | - |
-| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Upstash Redis | 重複投稿防止の状態保存 | - |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Upstash Redis | 重複投稿防止・画像ローテーション状態保存 | - |
 | `CRON_SECRET` | - | 全cronルートの認証(`Authorization: Bearer`またはURLクエリ`key`) | - |
+| `*_IMAGE_COUNT`(`FUJI_IMAGE_COUNT`等) | - | `src/app/api/post-images/<category>/`配下の連番画像の枚数 | - |
 
 **Instagramアクセストークンの期限**: Meta Graph APIの長期トークンは通常60日で失効する。期限確認は
 `https://graph.instagram.com/debug_token?input_token=<TOKEN>&access_token=<APP_ID>|<APP_SECRET>`
 のレスポンス`data.expires_at`(UNIX時間)で行う。トークン値・Vercelの環境変数更新日時はこのリポジトリのコード/git履歴には記録されていないため、確認は都度Vercelダッシュボードで行うこと。
+
+### 自動投稿ルートの共通パターン
+
+複数アカウント対応ルート(スクアド、@jake_images)は`src/app/api/_lib/post-sukuado-core.js` / `post-jake-ai-core.js`に投稿ロジックを集約し、`post-sukuado-morning`等の薄いルートファイルがslot名を渡して`run*()`を呼ぶだけになっている。単一アカウントのルート(`post-daily`、`post-instagram`、`post-evening`、`post-morning-all`)は各ファイル内で完結。共通のヘルパーファイルは無いため、新しいルートを足す際は以下を各ファイルにコピーする形で踏襲する:
+
+- **Xの重み付き文字数**: 280字制限は重み付きで、CJK(漢字・かな・全角記号)と絵文字は1文字あたり2、URLは実際の長さに関わらず常に23としてカウントされる。各ルートが`weightedLength()` / `clipWeighted()`を個別に実装している(単純な`.length`判定だと日本語ツイートが上限を超えて弾かれる)。全角中心のツイートは実質140字程度が上限。
+- **デバッグ用クエリパラメータ**: `?key=CRON_SECRET`(ブラウザから直接実行する際のクエリ認証)、`?dry=1`(投稿せず本文と重み付き文字数を確認)、`?force=1`(当日の重複チェックを無視)、`?report=1`(前回実行レポートを表示)、`?noimage=1`、`?skip=name,...`。
+- **Redis利用**: 当日重複防止は`SET NX`による原子的な予約、画像ローテーションは投稿成功後にのみindexを進めるカウンタ、@jake_imagesは直近の投稿履歴をプロンプトに渡して同じニュースの繰り返しを避けている。
+- 投稿本文はGemini(`gemini-2.5-flash`)がGoogle検索groundingを使って都度生成する設計。各ルート配下の`tweets.json`/`diary.json`等は立ち上げ用のフォールバック・種データであり、定常運用の本流ではない。
+
+`docs/jake_images_ai_trends_plan.md`と`docs/jake_images_x_handover.md`は`@jake_images`アカウント固有の編集方針(投稿頻度、扱う話題の範囲、CTAのローテーション)をまとめている。このアカウントのプロンプトやスケジュールを変更する前に読むこと。
 
 ## Cronスケジュール(`vercel.json`)
 
