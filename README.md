@@ -79,10 +79,10 @@ Motion Imaging の公式サイト（Next.js 16 / Vercel Hobby）と、SNS自動�
 | `post-images/scad-night/` | `01.jpg`〜 | 8 | `SCAD_NIGHT_IMAGE_COUNT` |
 | `post-images/jake-ai/` | `AI00001.JPG`〜 | 8 | `JAKE_AI_IMAGE_COUNT` |
 | `post-instagram/images/ig_motion_imaging/miyakojima/` | `01.jpg`〜`47.jpg` | 46（16.jpgが欠番） | `MIYAKOJIMA_IMAGE_COUNT`（既定47） |
-| `post-instagram/images/ig_motion_imaging/ishigaki/` | `01.jpg`〜`106.jpg` | 106 | `ISHIGAKI_IMAGE_COUNT`（既定109） |
+| `post-instagram/images/ig_motion_imaging/ishigaki/` | `01.jpg`〜`106.jpg` | 106 | `ISHIGAKI_IMAGE_COUNT`（既定106） |
 | `post-instagram/images/ig_jake_images/portrait/` | `01.jpg`〜`61.jpg` ＋ `exif.csv` | 61 | `JAKE_IMAGE_COUNT` |
 
-写真を追加したら、枚数の環境変数も合わせて更新する。
+写真を追加したら、枚数の環境変数も合わせて更新する。@motion.imaging のInstagramは、番号の写真が無い（欠番・枚数の設定ミス）場合は自動で次の番号に進む（最大10枚まで）。
 
 ---
 
@@ -122,7 +122,6 @@ Metaのトークンは**約60日で切れる**。また、Facebook側のパス�
 
 - **Threads（ミゴロン用）のトークンが 2026-09-15 から期限切れのまま**。上の同意画面の問題で motion.imaging のトークンを再発行できていない。本体の投稿には影響なし。jake用は 2026-09-28 に再発行した。スクアド用は未確認（管理画面で確認できる）。
 - Metaトークンの自動延長が未実装。
-- Instagram画像の欠番：`miyakojima/16.jpg` が無い。また石垣島は106枚なのに既定の枚数が109のため、`ISHIGAKI_IMAGE_COUNT` が未設定だと107〜109番の日に投稿が失敗する。
 - 管理画面のアクセス数・API使用量は未実装。
 
 ---
@@ -136,3 +135,4 @@ Metaのトークンは**約60日で切れる**。また、Facebook側のパス�
 | 2026-09 | 星空指数が雨の日に95% | 星空指数が天気を見ていなかった | open-meteo の雲量・天気から算出するよう変更 |
 | 2026-09-15頃〜09-28 | Instagram 2アカウントの投稿が止まっていた | Metaトークンの無効化（code=190） | トークンを再発行。気づけなかった反省から管理画面を追加 |
 | 2026-09-24〜09-25 | 全アカウントで画像が付かない／Instagramが投稿できない | `app/`→`src/app/` 移動で画像URLが404 | 全7ファイルのURLを `src/app/...` に修正 |
+| 2026-10-05（未発生） | 宮古島 `16.jpg` 欠番、石垣島の枚数設定が実際より3枚多い | 該当番号の日にInstagram投稿が失敗する状態だった | 欠番を飛ばす処理を追加、石垣島の既定枚数を106に修正 |
