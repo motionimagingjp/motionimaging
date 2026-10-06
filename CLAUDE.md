@@ -99,7 +99,7 @@ docs/
 
 ## 宣伝動画の制作
 
-SCADコネクトの宣伝ショート動画を作るときは、先に `promo/PARTYCONNECT_VIDEO_RULES.md` を読むこと。**動画は絵コンテ(画像)で流れが決まるまで作らない**(絵コンテ確定 → 見積もり確認 → 動画化の順)。
+宣伝ショート動画を作るときは、先に `promo/HANDOVER_VIDEO_PRODUCTION.md`(共通の引き継ぎ書。登場人物Saki/Rio、カメラワーク、手順)と、SCADコネクトなら `promo/PARTYCONNECT_VIDEO_RULES.md` を読むこと。**動画は絵コンテ(画像)で流れが決まるまで作らない**(絵コンテ確定 → 見積もり確認 → 動画化の順)。
 
 ## 開発メモ
 
