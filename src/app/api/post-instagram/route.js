@@ -50,7 +50,7 @@ const FOLDERS = {
   },
   ishigaki: {
     path: `${ACCOUNT}/ishigaki`,
-    count: parseInt(process.env.ISHIGAKI_IMAGE_COUNT || '109'),
+    count: parseInt(process.env.ISHIGAKI_IMAGE_COUNT || '106'),
     location: 'Ishigaki & Remote Islands, Okinawa Japan',
     locationJa: '石垣島',
     theme: '石垣島・離島のビーチ',
@@ -196,11 +196,28 @@ async function checkImage(imageUrl) {
   } catch (e) {
     throw new Error(`画像URLへの接続に失敗: ${e.message} / ${imageUrl}`);
   }
+  if (res.status === 404) return { missing: true };
   if (!res.ok) {
     throw new Error(`画像URLにアクセスできません [HTTP ${res.status}] ${imageUrl}`);
   }
   const size = parseInt(res.headers.get('content-length') || '0', 10);
-  return { size };
+  return { missing: false, size };
+}
+
+// 欠番（404）の画像は飛ばして、次に存在する番号を使う
+const MAX_IMAGE_SKIPS = 10;
+async function findAvailableImage(folder, startNext) {
+  const skipped = [];
+  let next = startNext;
+  for (let i = 0; i <= MAX_IMAGE_SKIPS; i++) {
+    const imageIndex = next + 1;
+    const imageUrl = buildImageUrl(folder.path, imageIndex);
+    const result = await checkImage(imageUrl);
+    if (!result.missing) return { next, imageIndex, imageUrl, size: result.size, skipped };
+    skipped.push(`${String(imageIndex).padStart(2, '0')}.jpg`);
+    next = (next + 1) % folder.count;
+  }
+  throw new Error(`画像が${MAX_IMAGE_SKIPS + 1}枚続けて見つかりません: ${skipped.join(', ')}（${folder.path}）`);
 }
 
 // ---- base64変換（高速版）------------------------------------
@@ -643,12 +660,10 @@ export async function GET(request) {
     const subFolder = FOLDERS[subKey];
     step('フォルダ選択', folderKey);
 
-    const { next, kvKey } = await getNextImageIndex(folderKey);
-    const imageIndex = next + 1;
-    const imageUrl   = buildImageUrl(folder.path, imageIndex);
+    const { next: startNext, kvKey } = await getNextImageIndex(folderKey);
+    const { next, imageIndex, imageUrl, size, skipped } = await findAvailableImage(folder, startNext);
     debug.imageUrl = imageUrl;
-
-    const { size } = await checkImage(imageUrl);
+    if (skipped.length > 0) step('欠番スキップ', skipped.join(', '));
     step('画像確認', `${imageUrl} (${Math.round(size / 1024)}KB)`);
 
     const [weatherInfo, marineInfo, subWeatherInfo] = await Promise.all([
