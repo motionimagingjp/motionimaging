@@ -85,6 +85,23 @@ SCADコネクトの宣伝ショート動画(YouTubeショート / TikTok)を作�
 - 声は短いつぶやき。ナレーション調にしない。声同士を重ねない
 - 数字や固有名詞が読めないときは、ひらがなにする
 
+## 保存済みのBGM(Jake作曲。Higgsfieldのメディアに保存済み)
+
+BGMは動画本体には入れず、投稿時に入れるのが基本。動画に入れたい場合は、下の `media_id` を使って組み立てる(`sandbox_exec` で曲をダウンロードして、声・効果音と合成する)。
+曲の長さ・雰囲気は未確認。使う前に、長さと音量(声より小さく)を確認すること。
+
+| 曲名 | media_id |
+|---|---|
+| TWO | `e8b1922a-3653-40a5-92c3-c2e0591a5947` |
+| Cold Moon, 4AM | `92e50aa5-6784-4aee-abca-f560203f4e0d` |
+| 1AM | `7d5cbe27-c2dd-4f28-8297-1b6b62daea2c` |
+| Dice(旧 Snow Falls) | `88c3b54d-3307-46c6-af84-ad2290dd5cf3` |
+| Lost in the Code | `28549caa-b858-4c5f-975e-254882fe1964` |
+
+- 曲を動画に重ねるときは、声の場面(約0〜4秒、5〜9秒、13〜16秒)は曲をさらに小さくする
+- 曲のダウンロードURLは、メディア一覧(`show_medias`)か、`media_id` から取得する
+- ユーザーの手元のファイルをHiggsfieldに入れるときは、`media_upload_widget` で1ファイルずつ(複数選択は使えない)
+
 ## 組み立て(Higgsfieldの `sandbox_exec`、ffmpeg)
 
 - この環境(クラウド版Claude Code)から、Higgsfieldの生成物は直接ダウンロードできない(403)。組み立てはsandbox内で行う
