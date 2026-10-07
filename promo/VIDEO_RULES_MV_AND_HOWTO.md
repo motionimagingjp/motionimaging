@@ -1,8 +1,7 @@
 # 宣伝動画・MV 制作ルール：まとめ（ハウツーとMVの違い）
 
-出典：ブランチ `claude/scadconnect-promo-video-3ttpna` の
-`promo/HANDOVER_VIDEO_PRODUCTION.md` と `promo/PARTYCONNECT_VIDEO_RULES.md`（2026-10-06〜07、Jakeの指示）を要約。
-そちらのほうが新しいルール。食い違う場合は、そちらを優先する。
+同じフォルダの `HANDOVER_VIDEO_PRODUCTION.md` と `PARTYCONNECT_VIDEO_RULES.md`（2026-10-06〜07、Jakeの指示）を要約したもの。
+食い違う場合は、そちらを優先する。入口は `00_START_HERE.md`。
 
 **最初に必ず、Jakeに「ハウツー・宣伝か、MVか」を確認する（確認は作業の前に）。**
 

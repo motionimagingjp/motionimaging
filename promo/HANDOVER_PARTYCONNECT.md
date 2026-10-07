@@ -1,5 +1,7 @@
 # 引き継ぎ書：SCADコネクト 宣伝ショート動画（新しいチャット用）
 
+> **補足資料（入口は `00_START_HERE.md`）。** 手順の正本は `HANDOVER_VIDEO_PRODUCTION.md` と `PARTYCONNECT_VIDEO_RULES.md`。
+>
 > **2026-10-07 追記**: ハウツーとMVでルールが違う。長さ・スピード・曲は `VIDEO_RULES_MV_AND_HOWTO.md` を優先する（ハウツーは20秒以内（目安14〜15秒）・1.4〜1.5倍速。MVは等倍）。主人公はSakiに決定（エレメントID `6ded8d7a-eb58-4bb7-8395-9b22c36984ef`）。
 
 新しいチャットにこのファイルと `PROMPT_RULES.md` を渡し、「これを読んで進めて」と伝える。

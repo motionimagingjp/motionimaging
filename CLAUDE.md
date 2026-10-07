@@ -99,7 +99,7 @@ docs/
 
 ## 宣伝動画の制作
 
-宣伝ショート動画を作るときは、先に `promo/HANDOVER_VIDEO_PRODUCTION.md`(共通の引き継ぎ書。登場人物Saki/Rio、カメラワーク、手順)と、SCADコネクトなら `promo/PARTYCONNECT_VIDEO_RULES.md` を読むこと。**動画は絵コンテ(画像)で流れが決まるまで作らない**(絵コンテ確定 → 見積もり確認 → 動画化の順)。
+**「動画を作りたい」「宣伝動画」「MV」などと言われたら、毎回、他の作業より先に `promo/00_START_HERE.md` を読むこと**(読む順番・確認事項・決まりごとの入口)。ハウツー・宣伝とMVはルールが違う(スピード・曲)。詳細は `promo/HANDOVER_VIDEO_PRODUCTION.md`(登場人物Saki/Rio、カメラワーク、手順)と、SCADコネクトなら `promo/PARTYCONNECT_VIDEO_RULES.md`。**動画は絵コンテ(画像)で流れが決まるまで作らない**(絵コンテ確定 → 見積もり確認 → 動画化の順)。
 
 ## 開発メモ
 
