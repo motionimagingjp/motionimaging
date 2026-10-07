@@ -97,6 +97,10 @@ docs/
 
 `/api/post-*`の各ルートがUTC基準で`crons`に登録されている(JST = UTC+9で換算)。パスを変更する場合は`vercel.json`の`path`も合わせて更新すること。ルート移動(`src/app/`配下である限り)だけならパスは変わらない。
 
+## 宣伝動画の制作
+
+宣伝ショート動画を作るときは、先に `promo/HANDOVER_VIDEO_PRODUCTION.md`(共通の引き継ぎ書。登場人物Saki/Rio、カメラワーク、手順)と、SCADコネクトなら `promo/PARTYCONNECT_VIDEO_RULES.md` を読むこと。**動画は絵コンテ(画像)で流れが決まるまで作らない**(絵コンテ確定 → 見積もり確認 → 動画化の順)。
+
 ## 開発メモ
 
 - `npm install` → `npm run build`でローカルビルド確認可能。`[Upstash Redis] The 'url' property is missing`(`KV_REST_API_URL`/`KV_REST_API_TOKEN`未設定)の警告は無視してよい(本番はVercel側に設定済み)。
