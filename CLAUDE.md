@@ -103,3 +103,30 @@ docs/
 - `package-lock.json`はリポジトリで管理している(2026-09-25追加)。依存を変えたとき以外は差分をコミットしない。
 - 運用手順(投稿一覧・管理画面・画像フォルダ・Metaトークン更新手順・障害記録)は`README.md`にまとめている。
 - ブランチが既にmainにマージ済みで古くなっている場合は`git fetch origin main && git merge-base --is-ancestor HEAD origin/main`で確認し、`git checkout -B <branch> origin/main`で作業ブランチを最新化してから着手する。
+
+## MV(ミュージックビデオ)制作ルール(「MVを作って」と言われたとき)
+
+ユーザーから「MVを作って」と依頼されたら、曲名・歌詞・雰囲気を受け取り、下記の役割と形式でHiggsfield等の動画生成AI用プロンプトを作る。**生成の実行前に必ずユーザーの承認を取る**(クレジットを消費するため)。
+
+### 役割
+世界的MVのトッププロデューサー兼カメラワークのエキスパートとして、視聴者が釘付けになり途切れず見続けたくなる、ダイナミックな回転カメラワークの**英語プロンプト**を作る。
+
+### カメラワーク設計のコア原則
+静止した回転ではなく、次の3軸を複合させる。
+1. **回転**: 360°周回(orbit)、コルクスクリュースパイラル、Z軸バレルロールなどの継続的な旋回
+2. **奥行き・高度変化**: 前後移動(push-in/pull-out)と高低差(low angle → eye level → overhead)を同時にかけ、立体的なパースペクティブの変化を作る
+3. **滑らかさと速度感**: ジンバルで制御されたような流麗さ(fluid gimbal movement)と、音楽的なキネティックエネルギー(cinematic motion blur)
+
+### 出力フォーマット(1ブロックにまとめる)
+1. **シーン演出意図**(日本語・2〜3行): カメラの回転軌道、テンポ感、視線の誘導
+2. **生成AI貼り付け用プロンプト**(英語):
+   ```text
+   [被写体・環境の描写], continuous seamless camera rotation [orbit / corkscrew spiral / barrel roll], dynamic depth shift [push-in / pull-out / vertical ascension], cinematic rotational motion blur, ultra-fluid gimbal stabilization, high kinetic momentum, professional music video cinematography, anamorphic lens flares, shallow depth of field, 8k resolution, photorealistic, 24fps
+   ```
+3. **ネガティブプロンプト**(英語・固定): `jitter, stuttering, abrupt camera cuts, jerky motion, distorted anatomy, morphing artifacts, low frame rate, static camera, shaky footage`
+4. **モーション指定・操作のコツ**(日本語・1〜2行): Higgsfieldのカメラ速度などの推奨設定。Motion Brush/Pathが使えない場合はプロンプトのカメラ指示で代替する
+
+### このリポジトリでの運用上の調整
+- **顔のカット**: 360°回転やバレルロールは顔が崩れやすい。顔は半周以内の緩やかな周回+push-inにとどめ、全周回転は人物なしの外観カットで使う
+- **ポリシー対策**: 「K-pop idol」や実在グループ名・実在ブランド名はプロンプトに入れない。日本語の文字は映像に入れず、字幕は編集で重ねる
+- 冒頭2秒から動きのある絵にし、同じ動きを2カット続けない
