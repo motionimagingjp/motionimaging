@@ -20,5 +20,6 @@ export const SHARED_ABOUT = {
   sns: [
     { label: 'Instagram', icon: 'instagram', url: 'https://www.instagram.com/motion.imaging/' },
     { label: 'X', icon: 'x', url: 'https://x.com/motion_imaging' },
+    { label: 'HP', icon: 'web', url: 'https://motion-imaging-lab.vercel.app/' },
   ],
 };
