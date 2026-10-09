@@ -38,6 +38,11 @@ export default function Home() {
               </a>
             );
           })}
+          {/* 開発中のアプリ。リンクなし。公開したら共通データ（shared-about-data.js）へ移す */}
+          <div style={{ padding: '20px', background: '#fff', borderRadius: '12px', border: '0.5px dashed rgba(0,0,0,0.15)', color: '#333', opacity: 0.6 }}>
+            <div style={{ fontSize: '18px', fontWeight: 500, marginBottom: '4px' }}>🤖 SNS投稿サポート</div>
+            <div style={{ fontSize: '13px', color: '#888' }}>開発中</div>
+          </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '40px' }}>
