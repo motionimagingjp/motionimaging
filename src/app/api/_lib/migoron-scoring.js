@@ -7,6 +7,14 @@
 //
 // 係数・座標は初期値。実測との答え合わせ（P4）を踏まえて調整すること。
 //
+// 2026-10-15 改善指示書P2対応：
+//   スポットをこのファイルの直書き配列から ./spots.json のマスタデータに
+//   移行。id/都道府県/種別を持たせ、花畑指数はスポットごとの見頃期間
+//   （bloomFrom/bloomTo、月日のfrom/to）で当日が期間内かを判定し、
+//   期間外のスポットは候補から除外するようにした（従来は月単位の
+//   固定候補プールだった）。needsReview:trueは実在性・座標の確認優先度が
+//   高いスポット（本番投入前にJakeが確認すること）。
+//
 // 【スポット座標について】
 // 緯度経度は既知の有名スポットとして可能な限り正確なものを設定したが、
 // 一覧CSV等での現地確認は行っていない。本番投入前にJakeが確認すること。
@@ -14,6 +22,9 @@
 // 永観堂（禅林寺）自体は京都の寺院であり東京に実在しないため、本モジュール
 // では東京の代替スポット（新宿御苑）に差し替えた。要確認。
 // ============================================================
+import spotsData from './spots.json';
+
+function displayName(s) { return `${s.name}（${s.pref}）`; }
 
 export function clampScore(n) {
   // 指示書P1: 「100%は出さない」→ 上限を95に固定
@@ -65,19 +76,15 @@ function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.len
 function pick(arr, idx) { return idx.map(i => Number(arr[i])).filter(n => Number.isFinite(n)); }
 
 // ============================================================
-// 雲海指数・富士山指数の対象スポット（post-dailyが使用）
+// 雲海指数・富士山指数の対象スポット（post-dailyが使用、spots.jsonから生成）
 // ============================================================
-export const CLOUD_SPOTS = [
-  { name: '竹田城跡（兵庫）', emoji: '☁️', lat: 35.3011, lon: 134.8186 },
-  { name: '高ボッチ高原（長野）', emoji: '☁️', lat: 36.1217, lon: 137.9686 },
-  { name: '山中湖パノラマ台（山梨）', emoji: '☁️', lat: 35.4336, lon: 138.9439 },
-];
+export const CLOUD_SPOTS = spotsData.spots
+  .filter(s => s.type === 'unkai')
+  .map(s => ({ name: displayName(s), emoji: '☁️', lat: s.lat, lon: s.lon }));
 
-export const FUJI_SPOTS = [
-  { name: '田貫湖（静岡）', emoji: '🗻', lat: 35.3306, lon: 138.6253, reflection: true },
-  { name: '新道峠（山梨）', emoji: '🗻', lat: 35.4886, lon: 138.7858, reflection: false },
-  { name: '山中湖パノラマ台（山梨）', emoji: '🗻', lat: 35.4336, lon: 138.9439, reflection: true },
-];
+export const FUJI_SPOTS = spotsData.spots
+  .filter(s => s.type === 'fuji')
+  .map(s => ({ name: displayName(s), emoji: '🗻', lat: s.lat, lon: s.lon, reflection: !!s.reflection }));
 
 // 雲海指数: 風速が弱いほど・前日との寒暖差が大きいほど・早朝の湿度が
 // 高いほど放射冷却による雲海の発生条件が整うとみなす。
@@ -175,15 +182,11 @@ export async function computeCloudAndFujiScores() {
 }
 
 // ============================================================
-// 星空指数の対象スポット・スコア算出（post-evening用）
+// 星空指数の対象スポット・スコア算出（post-evening用、spots.jsonから生成）
 // ============================================================
-export const STAR_SPOTS = [
-  { name: '河口湖（山梨）', lat: 35.5171, lon: 138.7519 },
-  { name: '爪木崎（静岡）', lat: 34.6726, lon: 138.9536 },
-  { name: '大洗（茨城）', lat: 36.3133, lon: 140.5750 },
-  { name: '三浦（神奈川）', lat: 35.1439, lon: 139.6178 },
-  { name: '秩父（埼玉）', lat: 35.9915, lon: 139.0856 },
-];
+export const STAR_SPOTS = spotsData.spots
+  .filter(s => s.type === 'star')
+  .map(s => ({ name: displayName(s), lat: s.lat, lon: s.lon }));
 
 // 天気コードごとの指数上限（雨・雪・霧の夜は雲量に関わらず星は見えない）
 function weatherCap(code) {
@@ -239,33 +242,49 @@ export async function computeStarScores(moonAdj) {
 }
 
 // ============================================================
-// 花畑指数の月別スポット・スコア算出（post-morning-all用）
+// 花畑指数のスポット選定（post-morning-all用）
 //
-// 「見頃期間」は日単位のfrom/toではなく、既存フォールバック表と同じ
-// 月単位の候補プールで代用している（日単位の精密な判定はP2のspots.json
-// 移行時に対応）。baseScoreはそのスポットの旬としての見頃度の目安で、
-// そこから直近の天候で減点する。
+// spots.jsonの各花スポットは見頃期間(bloomFrom〜bloomTo、月日)を持つ。
+// 投稿日がこの期間に入っているスポットだけを候補にする（期間外は除外）。
+// 12月→1月のように年をまたぐ期間（水仙など）はfrom>toで表現している。
 // ============================================================
-export const FLOWER_SPOTS_BY_MONTH = {
-  1: [['熱海梅園（静岡）', '🌼', 70, 35.0958, 139.0661], ['吾妻山公園（神奈川）', '🌼', 65, 35.2994, 139.2461], ['小石川後楽園（東京）', '🌸', 58, 35.7056, 139.7494]],
-  2: [['偕楽園（茨城）', '🌸', 85, 36.3722, 140.4642], ['越生梅林（埼玉）', '🌸', 78, 35.9661, 139.2967], ['吾妻山公園（神奈川）', '🌼', 70, 35.2994, 139.2461]],
-  3: [['権現堂堤（埼玉）', '🌸', 88, 36.0786, 139.7183], ['小田原城址公園（神奈川）', '🌸', 80, 35.2564, 139.1550], ['千鳥ヶ淵（東京）', '🌸', 74, 35.6881, 139.7514]],
-  4: [['ひたち海浜公園（茨城）', '💙', 92, 36.3997, 140.5986], ['あしかがフラワーパーク（栃木）', '🌸', 85, 36.3414, 139.4700], ['根津神社（東京）', '🌺', 76, 35.7206, 139.7611]],
-  5: [['ひたち海浜公園（茨城）', '💙', 88, 36.3997, 140.5986], ['あしかがフラワーパーク（栃木）', '🌸', 82, 36.3414, 139.4700], ['京成バラ園（千葉）', '🌹', 75, 35.7836, 140.1250]],
-  6: [['明月院（神奈川）', '💠', 90, 35.3331, 139.5458], ['本土寺（千葉）', '💠', 82, 35.7961, 139.9103], ['権現堂堤（埼玉）', '💠', 74, 36.0786, 139.7183]],
-  7: [['座間ひまわり畑（神奈川）', '🌻', 88, 35.4878, 139.3978], ['古河公方公園（茨城）', '🪷', 80, 36.1894, 139.7206], ['清水公園（千葉）', '🪷', 72, 35.9394, 139.8886]],
-  8: [['座間ひまわり畑（神奈川）', '🌻', 85, 35.4878, 139.3978], ['明野ひまわり畑（山梨）', '🌻', 78, 35.7400, 138.4600], ['上野不忍池（東京）', '🪷', 70, 35.7141, 139.7728]],
-  9: [['巾着田曼珠沙華公園（埼玉）', '🌺', 90, 35.9442, 139.2744], ['ひたち海浜公園（茨城）', '🍀', 82, 36.3997, 140.5986], ['くりはま花の国（神奈川）', '🌸', 74, 35.2211, 139.6700]],
-  10: [['ひたち海浜公園（茨城）', '🍁', 92, 36.3997, 140.5986], ['昭和記念公園（東京）', '🌼', 82, 35.7014, 139.4089], ['くりはま花の国（神奈川）', '🌸', 74, 35.2211, 139.6700]],
-  // 「永観堂もみじ（東京）」は永観堂（禅林寺）自体が京都の寺院で東京に実在しないため、
-  // 新宿御苑（東京の紅葉名所）に暫定差し替え。要Jake確認。
-  11: [['高尾山（東京）', '🍁', 90, 35.6253, 139.2431], ['新宿御苑（東京）', '🍁', 80, 35.6852, 139.7100], ['長瀞（埼玉）', '🍁', 74, 36.1206, 139.1086]],
-  12: [['六義園（東京）', '🍁', 72, 35.7306, 139.7467], ['明治神宮外苑（東京）', '🍂', 64, 35.6761, 139.7186], ['爪木崎（静岡）', '🌼', 56, 34.6726, 138.9536]],
-};
+const FLOWER_MASTER = spotsData.spots.filter(s => s.type === 'flower');
 
-export function getFlowerSpotsForMonth(month) {
-  const rows = FLOWER_SPOTS_BY_MONTH[month] || FLOWER_SPOTS_BY_MONTH[9];
-  return rows.map(([name, emoji, baseScore, lat, lon]) => ({ name, emoji, baseScore, lat, lon }));
+function monthDayNum(monthDay) {
+  const [m, d] = monthDay.split('-').map(Number);
+  return m * 100 + d;
+}
+
+function inBloomWindow(bloomFrom, bloomTo, targetNum) {
+  const from = monthDayNum(bloomFrom);
+  const to = monthDayNum(bloomTo);
+  if (from <= to) return targetNum >= from && targetNum <= to;
+  return targetNum >= from || targetNum <= to; // 年またぎ
+}
+
+function monthDayOf(date) {
+  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function flowerSpotsOnExactDate(date) {
+  const targetNum = monthDayNum(monthDayOf(date));
+  return FLOWER_MASTER.filter(s => inBloomWindow(s.bloomFrom, s.bloomTo, targetNum));
+}
+
+// 見頃期間内のスポットを返す（最大3件、baseScore順）。
+// 該当がゼロの場合（季節の端境期の隙間）のみ、前後に日付をずらして
+// 近い時期の見頃スポットを探す。baseScoreが高い順に季節を無視して
+// 埋めると季節外れスポットが混ざる（花畑指数の本来の不具合と同型）ため、
+// 必ず「近い日付で見頃のスポット」を優先する。
+export function getFlowerSpotsForDate(date) {
+  let matched = flowerSpotsOnExactDate(date);
+  for (let widen = 1; widen <= 10 && matched.length === 0; widen++) {
+    const after = flowerSpotsOnExactDate(new Date(date.getTime() + widen * 86400000));
+    const before = flowerSpotsOnExactDate(new Date(date.getTime() - widen * 86400000));
+    matched = after.length ? after : before;
+  }
+  matched = matched.slice().sort((a, b) => b.baseScore - a.baseScore).slice(0, 3);
+  return matched.map(s => ({ name: displayName(s), emoji: s.emoji, baseScore: s.baseScore, lat: s.lat, lon: s.lon }));
 }
 
 // 直近の雨・高温・強風で減点する
@@ -278,8 +297,8 @@ export function scoreFlower({ baseScore, todayMaxTemp, pastRainSums, todayWindMa
   return clampScore(score);
 }
 
-export async function computeFlowerScores(month) {
-  const spots = getFlowerSpotsForMonth(month);
+export async function computeFlowerScores(date) {
+  const spots = getFlowerSpotsForDate(date);
   const list = await fetchOpenMeteo({
     spots,
     daily: ['temperature_2m_max', 'precipitation_sum', 'windspeed_10m_max'],

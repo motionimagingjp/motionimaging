@@ -21,13 +21,16 @@
 //
 // 2026-10-15 改善指示書P1対応：
 //   スコアをGeminiの出力そのものから、src/app/api/_lib/migoron-scoring.js
-//   によるOpen-Meteo連動のコード計算に変更。スポットも月別の固定候補
-//   （FLOWER_SPOTS_BY_MONTH、緯度経度つき）から選ぶようにし、Geminiが
-//   自由にスポット・スコアを生成する余地をなくした（季節外れスポットが
-//   混入していた直接原因）。Geminiには算出済みスコア・天気を渡して
-//   メモ文のみを書かせる。スコア上限は95に固定。
-//   月単位の候補プールで「見頃期間」を代用しており、日単位の精密な
-//   判定（spots.jsonのfrom/to）はP2で対応する。
+//   によるOpen-Meteo連動のコード計算に変更。Geminiが自由にスポット・
+//   スコアを生成する余地をなくした（季節外れスポットが混入していた
+//   直接原因）。Geminiには算出済みスコア・天気を渡してメモ文のみを
+//   書かせる。スコア上限は95に固定。
+//
+// 2026-10-15 改善指示書P2対応：
+//   花畑のスポットをsrc/app/api/_lib/spots.jsonのマスタデータに移行。
+//   月単位の固定候補プールから、スポットごとの見頃期間(bloomFrom/bloomTo)
+//   による日単位の判定に変更し、投稿日が見頃期間外のスポットは候補から
+//   除外するようにした。
 //
 //  クエリパラメータ
 //    ?key=CRON_SECRET  … ブラウザから直接実行
@@ -39,7 +42,7 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
-import { getFlowerSpotsForMonth, computeFlowerScores } from '../_lib/migoron-scoring';
+import { getFlowerSpotsForDate, computeFlowerScores } from '../_lib/migoron-scoring';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
@@ -385,18 +388,18 @@ export async function GET(request) {
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
     const jstNow      = new Date(Date.now() + 9 * 3600000);
-    const curMonth    = jstNow.getMonth() + 1;
 
     // ★ スコアはOpen-Meteo連動でコード側が決定的に算出する
-    //  （migoron-scoring.js）。候補スポットは月別の固定リストから選び、
-    //   Geminiにはスコア・天気を渡さずメモ文だけを書かせる。
+    //  （migoron-scoring.js）。候補スポットは見頃期間(bloomFrom/bloomTo)で
+    //   当日が対象のものだけに絞り込み、Geminiにはスコア・天気を渡さず
+    //   メモ文だけを書かせる。
     let scored, scoreSource;
     try {
-      scored = await computeFlowerScores(curMonth);
+      scored = await computeFlowerScores(jstNow);
       if (!scored.every(s => s.ok)) throw new Error('一部スポットの天気取得に失敗');
       scoreSource = 'open-meteo';
     } catch (e) {
-      const spots = getFlowerSpotsForMonth(curMonth);
+      const spots = getFlowerSpotsForDate(jstNow);
       scored = spots.map(s => ({ ...s, score: s.baseScore, ok: false }));
       scoreSource = 'フォールバック（Open-Meteo取得失敗、季節ベーススコアを使用: ' + e.message + '）';
     }
