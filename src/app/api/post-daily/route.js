@@ -20,10 +20,19 @@
 //   （app/api/post-images/cloud/雲海001.jpg〜雲海004.jpg）を用意。
 //   富士山は5桁連番だが雲海は3桁連番のため、IMAGE_CATEGORIESに
 //   カテゴリごとのpad桁数を持たせて両対応にした。
+//
+// 2026-10-15 改善指示書P1対応：
+//   スコアをGeminiの出力そのものから、src/app/api/_lib/migoron-scoring.js
+//   によるOpen-Meteo連動のコード計算に変更。スポットも固定座標リスト
+//   （CLOUD_SPOTS/FUJI_SPOTS）に変更し、Geminiが実在しない/季節外れの
+//   スポットを選ぶ余地をなくした。Geminiにはスコア・天気を渡してメモ文
+//   のみを書かせる（星空指数と同じ設計）。スコア上限は95に固定（100%は
+//   出さない）。
 // ============================================================
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
+import { computeCloudAndFujiScores, CLOUD_SPOTS, FUJI_SPOTS } from '../_lib/migoron-scoring';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -78,37 +87,6 @@ function getDateStringJST() {
   return `${jst.getFullYear()}/${String(jst.getMonth() + 1).padStart(2, '0')}/${String(jst.getDate()).padStart(2, '0')}`;
 }
 
-async function getNightWeather() {
-  try {
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&timezone=Asia%2FTokyo&forecast_days=2';
-    const res = await fetch(url);
-    const data = await res.json();
-    const hours = data.hourly.time;
-    const codes = data.hourly.weathercode;
-    const temps = data.hourly.temperature_2m;
-    const nightIndices = hours.map((t, i) => ({ t, i })).filter(({ t }, idx) => {
-      const d = new Date(t);
-      const h = d.getHours();
-      return (h >= 21 && idx < 24) || (h <= 4 && idx >= 24);
-    }).map(({ i }) => i);
-    const worstCode = Math.max(...nightIndices.map(i => codes[i]));
-    const minTemp   = Math.min(...nightIndices.map(i => temps[i]));
-    let weather, penalty;
-    if (worstCode === 0)      { weather = '快晴';     penalty = 0;  }
-    else if (worstCode <= 2)  { weather = '晴れ';     penalty = 0;  }
-    else if (worstCode <= 3)  { weather = '曇り';     penalty = 10; }
-    else if (worstCode <= 49) { weather = '霧';       penalty = 20; }
-    else if (worstCode <= 67) { weather = '雨';       penalty = 30; }
-    else if (worstCode <= 69) { weather = '大雨';     penalty = 40; }
-    else if (worstCode <= 79) { weather = '雪';       penalty = 40; }
-    else if (worstCode <= 84) { weather = 'にわか雨'; penalty = 20; }
-    else                      { weather = '荒天';     penalty = 50; }
-    return { weather, penalty, min: Math.round(minTemp) };
-  } catch {
-    return { weather: '晴れ', penalty: 0, min: '--' };
-  }
-}
-
 function safeParseJson(raw) {
   try {
     const clean = raw.replace(/```json|```/g, '').trim();
@@ -120,19 +98,8 @@ function safeParseJson(raw) {
   }
 }
 
-// 例示の丸写し検出
-function looksLikeEchoedExample(spots, banned) {
-  if (!Array.isArray(spots) || spots.length === 0) return true;
-  let hit = 0;
-  for (let i = 0; i < spots.length && i < banned.length; i++) {
-    if (Number(spots[i].score) === banned[i]) hit++;
-  }
-  return hit >= Math.min(2, banned.length);
-}
-
 // スコアと日本語メモの語感が矛盾していないか検査する。
 // 「雲海指数80%なのにメモは発生困難」という事故の再発防止。
-// 矛盾を検出したら、平均スコアの帯に沿った決定的なメモへ差し替える。
 // 「期待薄」に「期待」が部分文字列として含まれるなど、単純な語の
 // 部分一致では誤判定するため、否定語は複合語も含めて具体的に列挙し、
 // 肯定語は誤って否定語を打ち消さない語だけを採用する。
@@ -155,7 +122,7 @@ function buildFallbackMemo(avgScore, kind) {
 }
 
 // ============================================================
-// Gemini
+// Gemini（メモ文のみ生成。スコアは渡すだけで変更させない）
 // ============================================================
 async function callGemini(apiKey, prompt, maxTokens) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
@@ -174,67 +141,24 @@ async function callGemini(apiKey, prompt, maxTokens) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
-// ============================================================
-// 共通：スポット3件形式のツイート生成（雲海／富士山で共有）
-// ============================================================
-async function buildSpotTweet(opts) {
-  const { apiKey, dateLabel, weather, penalty, min, kind, title, emoji, hashtag,
-          fallbackSpots, exampleSpots, defaultTime, diag } = opts;
-
-  const prompt = `明日早朝の${title}スポット3件のミゴロン指数を算出してください。\n`
-    + '日付：' + dateLabel + '\n'
-    + '今夜〜明朝の天気：' + weather + '（最低気温' + min + '℃）\n'
-    + '天気による指数補正：' + penalty + '%を差し引くこと。\n'
-    + `条件：${kind === 'cloud' ? '実在する日本の山・高原3件' : '富士山周辺の実在する場所3件'}\n`
-    + '【重要】スコアは天気補正を反映して必ず自分で計算すること。例示の数値をそのまま使わないこと。\n'
-    + 'スコアは整数（10〜100）。\n'
-    + 'スポット名は都道府県名を含めて10文字以内で簡潔に（例：高ボッチ高原(長野)）。\n'
-    + 'memoはスコアの傾向と矛盾しない内容で20文字以内。\n\n'
-    + '次のスキーマのJSONのみで返答（マークダウン不要）：\n'
-    + `{"spots":[{"name":"<10文字以内のスポット名>","emoji":"${emoji}","score":<整数>}],"time":"<最適時間帯>","memo":"<20文字以内のコメント>"}`;
-
-  let parsed = null;
+async function buildMemo(apiKey, kind, title, ranked, avgScore, defaultTime) {
+  let memo = null;
   try {
-    const raw = await callGemini(apiKey, prompt);
-    parsed = safeParseJson(raw);
-  } catch { parsed = null; }
+    const prompt = `明日早朝の${title}のコンディションを一言でまとめてください。\n`
+      + '算出済みの指数：' + ranked.map(s => `${s.name}=${s.score}%`).join('、') + '\n'
+      + '【重要】上記の指数と矛盾しない内容にすること。数値を変更・追加しないこと。\n'
+      + '20文字以内の日本語1文のみを出力（JSONやマークダウン不要）。';
+    const raw = await callGemini(apiKey, prompt, 100);
+    if (raw) memo = raw.replace(/\n/g, '').replace(/^["'`]|["'`]$/g, '').trim();
+  } catch { memo = null; }
 
-  let spots, time, memo;
-  if (parsed && Array.isArray(parsed.spots) && parsed.spots.length > 0
-      && !looksLikeEchoedExample(parsed.spots, exampleSpots.map(s => s.score))) {
-    spots = parsed.spots.filter(s => s && s.name && typeof s.score !== 'undefined');
-    time  = parsed.time || defaultTime;
-    memo  = parsed.memo || buildFallbackMemo(60, kind);
-    diag.source = 'Gemini';
-  } else {
-    spots = [];
-  }
-
-  if (spots.length === 0) {
-    spots = fallbackSpots.map(s => ({ name: s.name, emoji: s.emoji, score: Math.max(10, s.score - penalty) }));
-    time = defaultTime;
-    diag.source = diag.source || 'フォールバック（Gemini失敗）';
-    diag.memoSource = 'fallback';
-  }
-
-  // ★ スコアの下限処理を「必ず」適用する（Gemini値・フォールバック値どちらにも）
-  //   旧実装はここが抜けており、Geminiが低い値や0を返すとそのまま
-  //   0%表示になっていた（富士山指数の事故の直接原因）。
-  spots = spots.map(s => ({
-    name: s.name,
-    emoji: s.emoji || emoji,
-    score: Math.max(10, Math.min(100, Math.round(Number(s.score) || 10))),
-  }));
-
-  const ranked = spots.slice().sort((a, b) => b.score - a.score);
-  const avgScore = Math.round(ranked.reduce((sum, s) => sum + s.score, 0) / ranked.length);
-
-  // ★ スコアとメモの矛盾チェック（雲海80%なのに「発生困難」事故の再発防止）
   if (!memo || memoContradictsScore(avgScore, memo)) {
-    if (diag.memoSource !== 'fallback' && memo) diag.memoOverridden = `矛盾検出のため上書き: "${memo}"`;
     memo = buildFallbackMemo(avgScore, kind);
   }
+  return memo;
+}
 
+function buildTweetText(title, dateLabel, ranked, memo, time, hashtag) {
   const build = (nameW, memoW) => {
     let t = `${title}指数【` + dateLabel + '】\n';
     for (const s of ranked) t += s.emoji + ' ' + clipWeighted(s.name, nameW) + '(' + s.score + '%)\n';
@@ -243,45 +167,12 @@ async function buildSpotTweet(opts) {
     t += hashtag;
     return t;
   };
-
-  // スポット3件・メモ1件という少ない要素数のため余裕がある。
-  // Geminiへの指示（名前10文字以内=重み20、メモ20文字以内=重み40）を
-  // 上回る余裕を持たせた予算にする。旧予算(16/30等)は実際の文字数より
-  // 小さすぎ、余裕があるのに不必要に途中で切れる不具合があったため修正。
   const plans = [[24, 44], [20, 36], [16, 26], [13, 16], [11, 0]];
   for (const [nameW, memoW] of plans) {
     const t = build(nameW, memoW);
     if (weightedLength(t) <= X_TARGET) return t;
   }
   return clipWeighted(build(9, 0), X_LIMIT);
-}
-
-async function buildCloudSeaTweet(apiKey, dateLabel, weather, penalty, min, diag) {
-  return buildSpotTweet({
-    apiKey, dateLabel, weather, penalty, min, diag,
-    kind: 'cloud', title: '雲海', emoji: '☁️', hashtag: '#雲海予報 #絶景 #ミゴロン',
-    defaultTime: '4:00〜6:00',
-    exampleSpots: [{ score: 80 }, { score: 70 }, { score: 55 }],
-    fallbackSpots: [
-      { name: '高ボッチ高原（長野）',     emoji: '☁️', score: 80 },
-      { name: '山中湖パノラマ台（山梨）', emoji: '☁️', score: 70 },
-      { name: '秩父美の山公園（埼玉）',   emoji: '☁️', score: 55 },
-    ],
-  });
-}
-
-async function buildFujisanTweet(apiKey, dateLabel, weather, penalty, min, diag) {
-  return buildSpotTweet({
-    apiKey, dateLabel, weather, penalty, min, diag,
-    kind: 'fuji', title: '富士山', emoji: '🗻', hashtag: '#富士山 #風景写真 #ミゴロン',
-    defaultTime: '5:00〜7:00',
-    exampleSpots: [{ score: 90 }, { score: 85 }, { score: 75 }],
-    fallbackSpots: [
-      { name: '新道峠（山梨）',           emoji: '🗻', score: 90 },
-      { name: '田貫湖（静岡）',           emoji: '🗻', score: 85 },
-      { name: '山中湖パノラマ台（山梨）', emoji: '🗻', score: 75 },
-    ],
-  });
 }
 
 // ============================================================
@@ -456,28 +347,46 @@ export async function GET(request) {
 
     const API_KEY   = process.env.GEMINI_API_KEY;
     const dateLabel = getTomorrowLabel();
-    const { weather, penalty, min } = await getNightWeather();
-    report.weather = weather;
 
-    const cloudDiag = {};
-    const fujiDiag  = {};
-    const cloudSeaTweet = await buildCloudSeaTweet(API_KEY, dateLabel, weather, penalty, min, cloudDiag);
-    const fujisanTweet  = await buildFujisanTweet(API_KEY, dateLabel, weather, penalty, min, fujiDiag);
+    // ★ スコアはOpen-Meteo連動でコード側が決定的に算出する
+    //  （migoron-scoring.js）。Geminiにはスコアを渡さず、算出結果を
+    //   渡してメモ文だけを書かせる。
+    let cloudScores, fujiScores, scoreSource = 'open-meteo';
+    try {
+      ({ cloudScores, fujiScores } = await computeCloudAndFujiScores());
+    } catch (e) {
+      // Open-Meteo自体が落ちた場合のみ、固定の中間スコアにフォールバックする
+      scoreSource = 'フォールバック（Open-Meteo取得失敗: ' + e.message + '）';
+      cloudScores = CLOUD_SPOTS.map(s => ({ ...s, score: 50, ok: false }));
+      fujiScores  = FUJI_SPOTS.map(s => ({ ...s, score: 50, ok: false }));
+    }
+
+    const cloudRanked = cloudScores.slice().sort((a, b) => b.score - a.score);
+    const fujiRanked  = fujiScores.slice().sort((a, b) => b.score - a.score);
+    const cloudAvg = Math.round(cloudRanked.reduce((s, x) => s + x.score, 0) / cloudRanked.length);
+    const fujiAvg  = Math.round(fujiRanked.reduce((s, x) => s + x.score, 0) / fujiRanked.length);
+
+    const cloudMemo = await buildMemo(API_KEY, 'cloud', '雲海', cloudRanked, cloudAvg, '4:00〜6:00');
+    const fujiMemo  = await buildMemo(API_KEY, 'fuji', '富士山', fujiRanked, fujiAvg, '5:00〜7:00');
+
+    const cloudSeaTweet = buildTweetText('雲海', dateLabel, cloudRanked, cloudMemo, '4:00〜6:00', '#雲海予報 #絶景 #ミゴロン');
+    const fujisanTweet  = buildTweetText('富士山', dateLabel, fujiRanked, fujiMemo, '5:00〜7:00', '#富士山 #風景写真 #ミゴロン');
 
     report.lengths = {
       cloud_sea: weightedLength(cloudSeaTweet),
       fujisan:   weightedLength(fujisanTweet),
       limit: X_LIMIT,
     };
-    report.sources = { cloud_sea: cloudDiag, fujisan: fujiDiag };
+    report.sources = { cloud_sea: scoreSource, fujisan: scoreSource };
 
     if (dryRun) {
       return new Response(JSON.stringify({
         message: 'Dry run（投稿していません）',
         tweets: {
-          cloud_sea: { weighted: weightedLength(cloudSeaTweet), text: cloudSeaTweet, diag: cloudDiag },
-          fujisan:   { weighted: weightedLength(fujisanTweet),  text: fujisanTweet,  diag: fujiDiag },
+          cloud_sea: { weighted: weightedLength(cloudSeaTweet), text: cloudSeaTweet, scores: cloudScores },
+          fujisan:   { weighted: weightedLength(fujisanTweet),  text: fujisanTweet,  scores: fujiScores },
         },
+        scoreSource,
       }, null, 2), { status: 200, headers: jsonHeaders });
     }
 
@@ -553,7 +462,7 @@ export async function GET(request) {
       },
     });
 
-    return new Response(JSON.stringify({ message: 'Done', date: dateLabel, weather, report }, null, 2), { status: 200, headers: jsonHeaders });
+    return new Response(JSON.stringify({ message: 'Done', date: dateLabel, report }, null, 2), { status: 200, headers: jsonHeaders });
 
   } catch (error) {
     report.fatalError = error.message;
