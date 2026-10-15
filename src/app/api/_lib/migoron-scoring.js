@@ -81,13 +81,16 @@ export const FUJI_SPOTS = [
 
 // 雲海指数: 風速が弱いほど・前日との寒暖差が大きいほど・早朝の湿度が
 // 高いほど放射冷却による雲海の発生条件が整うとみなす。
+// 係数は連続値にしている。段階的な閾値（5刻みの固定加点）にすると、
+// 実測データでも結果が5の倍数ばかりに揃ってしまい、以前Geminiの出力が
+// 「5刻みで機械的」と指摘された見た目をコード計算でも再現してしまうため。
 export function scoreCloudSea({ dawnWeatherCode, dawnWindAvg, dawnHumidityAvg, diurnalRange }) {
-  let score = 70;
-  score += dawnWindAvg <= 2 ? 15 : dawnWindAvg <= 4 ? 5 : dawnWindAvg <= 7 ? 0 : -20;
-  score += dawnHumidityAvg >= 85 ? 10 : dawnHumidityAvg >= 70 ? 0 : -15;
-  score += diurnalRange >= 10 ? 15 : diurnalRange >= 6 ? 5 : -10;
-  if (dawnWeatherCode >= 45) score -= 40;       // 霧・雨など、視界自体が悪い
-  else if (dawnWeatherCode >= 2) score -= 5;    // 曇り
+  let score = 60;
+  score += Math.max(0, 20 - dawnWindAvg * 2.5);      // 無風に近いほど加点、7〜8m/sでほぼ0
+  score += (dawnHumidityAvg - 65) * 0.5;              // 早朝湿度が高いほど加点
+  score += (diurnalRange - 5) * 1.8;                  // 前日との寒暖差が大きいほど加点
+  if (dawnWeatherCode >= 45) score -= 40;             // 霧・雨など、視界自体が悪い
+  else if (dawnWeatherCode >= 2) score -= 5;          // 曇り
   return clampScore(score);
 }
 
