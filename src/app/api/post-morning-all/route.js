@@ -11,23 +11,23 @@
 //            合わないため。花畑指数の1本のみに変更（六曜・選日計算も
 //            使用箇所がなくなったため削除）。
 //
-//  ★ 今回の主眼：Xの「重み付き文字数」に対応
+//  ★ Xの「重み付き文字数」に対応
 //    Xの280字制限は重み付きで、CJK（漢字・かな・全角記号）と絵文字は
 //    1文字あたり2としてカウントされます。日本語は実質140字までです。
-//    従来は text.length（CJKを1と数える）で判定していたため、
-//    日本語版の花畑指数が上限を超えて弾かれる日がありました。
-//    「全部通る日と抜ける日がある」原因はこれです。
-//
-//    - weightedLength() でXと同じ数え方を実装
-//    - 日本語版・開運指数すべてに段階的短縮を適用
-//    - レポートには重み付き文字数(w)を記録
-//
-//  ★ 併せて追加
-//    - X投稿の自動リトライ（重複403は再試行しない）
-//    - Threads投稿にタイムアウト（ハングで全体を止めない）
+//    weightedLength() でXと同じ数え方を実装し、段階的短縮を適用する。
 //
 //  ※ Instagramは独立cron（/api/post-instagram、/api/post-jake-images）
-//    このファイルからは呼びません。vercel.json も5本構成のものを使用。
+//    このファイルからは呼びません。
+//
+// 2026-10-15 改善指示書P1対応：
+//   スコアをGeminiの出力そのものから、src/app/api/_lib/migoron-scoring.js
+//   によるOpen-Meteo連動のコード計算に変更。スポットも月別の固定候補
+//   （FLOWER_SPOTS_BY_MONTH、緯度経度つき）から選ぶようにし、Geminiが
+//   自由にスポット・スコアを生成する余地をなくした（季節外れスポットが
+//   混入していた直接原因）。Geminiには算出済みスコア・天気を渡して
+//   メモ文のみを書かせる。スコア上限は95に固定。
+//   月単位の候補プールで「見頃期間」を代用しており、日単位の精密な
+//   判定（spots.jsonのfrom/to）はP2で対応する。
 //
 //  クエリパラメータ
 //    ?key=CRON_SECRET  … ブラウザから直接実行
@@ -39,6 +39,7 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
+import { getFlowerSpotsForMonth, computeFlowerScores } from '../_lib/migoron-scoring';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
@@ -57,14 +58,13 @@ const redis = new Redis({
 //   URLは実際の長さに関わらず23
 // ============================================================
 function weightedLength(text) {
-  // URLを先に23として計上し、本文から除外する
   const urlRegex = /https?:\/\/[^\s]+/g;
   const urls = text.match(urlRegex) || [];
   const stripped = text.replace(urlRegex, '');
 
   let total = urls.length * 23;
 
-  for (const ch of stripped) {          // for...of はコードポイント単位
+  for (const ch of stripped) {
     const cp = ch.codePointAt(0);
     const isWeight1 =
       (cp >= 0x0000 && cp <= 0x10ff) ||
@@ -76,7 +76,6 @@ function weightedLength(text) {
   return total;
 }
 
-// 重み付きで n 以内に収まるよう末尾を落とす
 function clipWeighted(str, maxWeight) {
   str = String(str);
   if (weightedLength(str) <= maxWeight) return str;
@@ -84,7 +83,7 @@ function clipWeighted(str, maxWeight) {
   let w = 0;
   for (const ch of str) {
     const cw = weightedLength(ch);
-    if (w + cw > maxWeight - 1) break;   // 末尾の「…」分を確保
+    if (w + cw > maxWeight - 1) break;
     out += ch;
     w += cw;
   }
@@ -92,130 +91,33 @@ function clipWeighted(str, maxWeight) {
 }
 
 // ============================================================
-// 日付・季節
+// 日付
 // ============================================================
 function getTodayLabel() {
   const jst = new Date(Date.now() + 9 * 3600000);
   return `${jst.getMonth() + 1}月${jst.getDate()}日`;
 }
 
-function isSakuraSeason() {
-  const jst = new Date(Date.now() + 9 * 3600000);
-  const m = jst.getMonth() + 1;
-  const d = jst.getDate();
-  return (m === 2) || (m === 3) || (m === 4 && d <= 15);
+// スコアとメモの語感が矛盾していないか検査する（雲海・星空指数と同型の安全弁）
+const NEGATIVE_PHRASES = ['難しい', '困難', '期待薄', '厳しい', '見込みは低', '見頃を過ぎ', '望めない', '見られない'];
+const POSITIVE_PHRASES = ['見頃', 'おすすめ', '満開', '狙い目', '期待できます', '期待大'];
+
+function memoContradictsScore(avgScore, memo) {
+  const hasNegative = NEGATIVE_PHRASES.some(p => memo.includes(p));
+  const hasPositive = POSITIVE_PHRASES.some(p => memo.includes(p));
+  if (avgScore >= 60 && hasNegative && !hasPositive) return true;
+  if (avgScore < 35 && hasPositive && !hasNegative) return true;
+  return false;
 }
 
-function getSeasonalFlowers() {
-  const jst = new Date(Date.now() + 9 * 3600000);
-  const m = jst.getMonth() + 1;
-  const d = jst.getDate();
-  if (m === 1)            return ['水仙', '蝋梅'];
-  if (m === 2)            return ['梅', '菜の花', '水仙'];
-  if (m === 3)            return ['桜', '菜の花', '梅'];
-  if (m === 4 && d <= 15) return ['桜', '菜の花', 'チューリップ'];
-  if (m === 4 && d > 15)  return ['ネモフィラ', 'ツツジ', '藤', 'チューリップ'];
-  if (m === 5)            return ['ネモフィラ', 'ツツジ', '藤', 'バラ'];
-  if (m === 6)            return ['紫陽花', 'バラ', 'ポピー', 'ラベンダー'];
-  if (m === 7)            return ['ひまわり', '蓮', 'ラベンダー'];
-  if (m === 8)            return ['ひまわり', '蓮'];
-  if (m === 9)            return ['彼岸花', 'コスモス'];
-  if (m === 10)           return ['コスモス', '紅葉'];
-  if (m === 11)           return ['紅葉', 'コスモス'];
-  if (m === 12)           return ['水仙', '蝋梅'];
-  return [];
+function buildFallbackMemo(avgScore, weatherJA) {
+  if (avgScore >= 70) return `${weatherJA}の一日、見頃の花をチェック。`;
+  if (avgScore >= 45) return `${weatherJA}。見頃はもう少し先か終盤の花も。`;
+  return `${weatherJA}の影響で、今回は見頃がやや控えめです。`;
 }
 
 // ============================================================
-// 季節別スポット（2026-09 追加）
-//
-//  旧実装のフォールバックは「ひたち海浜公園/あしかがフラワーパーク/
-//  昭和記念公園/武蔵丘陵森林公園/横浜公園」の固定5件だった。
-//  これは春の藤・ネモフィラ期を前提にした並びで、9月に出すと
-//  季節外れになる。月ごとに実際の見頃スポットへ差し替える。
-// ============================================================
-const SEASONAL_SPOTS = {
-  1:  [['熱海梅園（静岡）','🌼',70],['吾妻山公園（神奈川）','🌼',65],['小石川後楽園（東京）','🌸',58],['筑波山梅林（茨城）','🌸',52],['越生梅林（埼玉）','🌿',45]],
-  2:  [['偕楽園（茨城）','🌸',85],['越生梅林（埼玉）','🌸',78],['吾妻山公園（神奈川）','🌼',70],['熱海梅園（静岡）','🌸',62],['湯河原梅林（神奈川）','🌿',55]],
-  3:  [['権現堂堤（埼玉）','🌸',88],['小田原城址公園（神奈川）','🌸',80],['千鳥ヶ淵（東京）','🌸',74],['三浦海岸（神奈川）','🌸',66],['吉見百穴（埼玉）','🌿',58]],
-  4:  [['ひたち海浜公園（茨城）','💙',92],['あしかがフラワーパーク（栃木）','🌸',85],['根津神社（東京）','🌺',76],['昭和記念公園（東京）','🌷',68],['秩父羊山公園（埼玉）','🌸',60]],
-  5:  [['ひたち海浜公園（茨城）','💙',88],['あしかがフラワーパーク（栃木）','🌸',82],['京成バラ園（千葉）','🌹',75],['秩父羊山公園（埼玉）','🌸',66],['塩船観音寺（東京）','🌺',58]],
-  6:  [['明月院（神奈川）','💠',90],['本土寺（千葉）','💠',82],['権現堂堤（埼玉）','💠',74],['横須賀しょうぶ園（神奈川）','🌿',66],['京成バラ園（千葉）','🌹',58]],
-  7:  [['座間ひまわり畑（神奈川）','🌻',88],['古河公方公園（茨城）','🪷',80],['清水公園（千葉）','🪷',72],['たてやま西岬（千葉）','🌻',64],['あけぼの山農業公園（千葉）','🌻',56]],
-  8:  [['座間ひまわり畑（神奈川）','🌻',85],['明野ひまわり畑（山梨）','🌻',78],['上野不忍池（東京）','🪷',70],['清水公園（千葉）','🪷',62],['那須フラワーワールド（栃木）','🌺',54]],
-  9:  [['巾着田曼珠沙華公園（埼玉）','🌺',90],['ひたち海浜公園（茨城）','🍀',82],['くりはま花の国（神奈川）','🌸',74],['権現堂堤（埼玉）','🌺',66],['昭和記念公園（東京）','🌼',58]],
-  10: [['ひたち海浜公園（茨城）','🍁',92],['昭和記念公園（東京）','🌼',82],['くりはま花の国（神奈川）','🌸',74],['鼻高展望花の丘（群馬）','🌼',66],['小江戸川越（埼玉）','🍁',58]],
-  11: [['高尾山（東京）','🍁',90],['永観堂もみじ（東京）','🍁',80],['長瀞（埼玉）','🍁',74],['日光いろは坂（栃木）','🍁',66],['昭和記念公園（東京）','🍁',58]],
-  12: [['六義園（東京）','🍁',72],['明治神宮外苑（東京）','🍂',64],['爪木崎（静岡）','🌼',56],['あしかがフラワーパーク（栃木）','✨',50],['なばなの里（三重）','✨',44]],
-};
-
-function getFallbackSpots(month, penalty) {
-  const rows = SEASONAL_SPOTS[month] || SEASONAL_SPOTS[9];
-  return rows.map(function (r) {
-    return { name: r[0], emoji: r[1], score: Math.max(10, Math.round(r[2] - penalty)) };
-  });
-}
-
-// Geminiがプロンプトの例示JSONをそのまま返していないか検査する
-// （例示の数値をそのままコピーして返す事故が実際に発生していた）
-function looksLikeEchoedExample(spots) {
-  if (!Array.isArray(spots) || spots.length === 0) return true;
-  const scores = spots.map(function (s) { return Number(s.score); });
-  const banned = [65, 58, 52, 45, 38];   // 旧プロンプトの例示値
-  let hit = 0;
-  for (let i = 0; i < scores.length && i < banned.length; i++) {
-    if (scores[i] === banned[i]) hit++;
-  }
-  return hit >= 4;
-}
-
-// 安全なJSON抽出（失敗してもnullを返すだけで死なない）
-function safeParseJson(raw) {
-  try {
-    const clean = raw.replace(/```json|```/g, '').trim();
-    const match = clean.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
-}
-
-// ============================================================
-// 天気
-// ============================================================
-async function getDaytimeWeather() {
-  try {
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&hourly=weathercode,temperature_2m&timezone=Asia%2FTokyo&forecast_days=1';
-    const res = await fetch(url);
-    const data = await res.json();
-    const hours = data.hourly.time;
-    const codes = data.hourly.weathercode;
-    const temps = data.hourly.temperature_2m;
-    const dayIndices = hours.map((t, i) => ({ t, i })).filter(({ t }) => {
-      const h = new Date(t).getHours();
-      return h >= 6 && h <= 20;
-    }).map(({ i }) => i);
-    const worstCode = Math.max(...dayIndices.map(i => codes[i]));
-    const maxTemp   = Math.max(...dayIndices.map(i => temps[i]));
-    let weatherJA, weatherEN, penalty;
-    if (worstCode === 0)      { weatherJA = '快晴';     weatherEN = 'clear skies';     penalty = 0;  }
-    else if (worstCode <= 2)  { weatherJA = '晴れ';     weatherEN = 'sunny';           penalty = 0;  }
-    else if (worstCode <= 3)  { weatherJA = '曇り';     weatherEN = 'cloudy';          penalty = 10; }
-    else if (worstCode <= 49) { weatherJA = '霧';       weatherEN = 'foggy';           penalty = 20; }
-    else if (worstCode <= 67) { weatherJA = '雨';       weatherEN = 'rainy';           penalty = 30; }
-    else if (worstCode <= 69) { weatherJA = '大雨';     weatherEN = 'heavy rain';      penalty = 40; }
-    else if (worstCode <= 79) { weatherJA = '雪';       weatherEN = 'snowy';           penalty = 40; }
-    else if (worstCode <= 84) { weatherJA = 'にわか雨'; weatherEN = 'passing showers'; penalty = 20; }
-    else                      { weatherJA = '荒天';     weatherEN = 'stormy';          penalty = 50; }
-    return { weatherJA, weatherEN, penalty, max: Math.round(maxTemp) };
-  } catch {
-    return { weatherJA: '晴れ', weatherEN: 'sunny', penalty: 0, max: '--' };
-  }
-}
-
-// ============================================================
-// Gemini
+// Gemini（メモ文のみ生成）
 // ============================================================
 async function callGemini(apiKey, prompt, maxTokens) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
@@ -238,64 +140,28 @@ async function callGemini(apiKey, prompt, maxTokens) {
   return (textPart ? textPart.text : parts[parts.length - 1].text).trim();
 }
 
+async function buildMemo(apiKey, ranked, avgScore, weatherJA) {
+  let memo = null;
+  try {
+    const prompt = '今日の花畑のコンディションを一言でまとめてください。\n'
+      + '算出済みの指数：' + ranked.map(s => `${s.name}=${s.score}%`).join('、') + '\n'
+      + '今日の天気：' + weatherJA + '\n'
+      + '【重要】上記の指数と天気に矛盾しない内容にすること。数値は変更・追加しないこと。\n'
+      + '20文字以内の日本語1文のみを出力（JSONやマークダウン不要）。';
+    const raw = await callGemini(apiKey, prompt, 100);
+    if (raw) memo = raw.replace(/\n/g, '').replace(/^["'`]|["'`]$/g, '').trim();
+  } catch { memo = null; }
+
+  if (!memo || memoContradictsScore(avgScore, memo)) {
+    memo = buildFallbackMemo(avgScore, weatherJA);
+  }
+  return memo;
+}
+
 // ============================================================
 // 花畑指数（日本語）— 重み付きで必ず280以内に収める
 // ============================================================
-async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA, penalty, max, month, diag) {
-  const seasonInfo = sakura
-    ? '桜シーズン。2月1日からの積算温度で開花進捗を算出（開花210℃/満開370℃）。関東・近郊の桜名所5件。'
-    : '今が旬の花：' + flowers.join('、') + '。関東・近郊の実在する名所5件を選ぶ。';
-  let parsed = null;
-  try {
-    // 例示JSONに具体的な数値を書くと、Geminiがそれをそのままコピーして
-    // 返してくることがある（2026年9月に3日連続で同一内容が投稿された原因）。
-    // スキーマだけを示し、数値は必ず自分で算出させる。
-    const prompt = '以下の条件で花スポット5件のミゴロン指数を算出してください。\n'
-      + '条件：' + seasonInfo + '\n'
-      + '日付：' + dateLabel + '\n'
-      + '今日の天気：' + weatherJA + '（最高' + max + '℃）\n'
-      + '天気による指数補正：各スポットの指数から' + penalty + '%を差し引くこと。\n'
-      + '【重要】スコアは必ず今日の天気と季節から自分で計算すること。例示の数値をそのまま使わないこと。\n'
-      + 'スポット名は12文字以内、memoは20文字以内で簡潔に。\n'
-      + 'スコアは整数（小数点なし）、10〜100の範囲。\n\n'
-      + '次のスキーマのJSONのみで返答（マークダウン不要）：\n'
-      + '{"spots":[{"name":"<スポット名（都県名）>","emoji":"<花の絵文字>","score":<整数>}],"memo":"<今日のコンディションを一言>"}';
-    const raw = await callGemini(apiKey, prompt);
-    parsed = safeParseJson(raw);
-  } catch { parsed = null; }
-
-  let spots, memo;
-  if (parsed && Array.isArray(parsed.spots) && parsed.spots.length > 0) {
-    spots = parsed.spots.filter(s => s && s.name && typeof s.score !== 'undefined');
-    memo  = parsed.memo || '各地で花が見頃です。';
-  } else {
-    spots = [];
-  }
-
-  // 例示JSONの丸写しを検出したらフォールバックに切り替える
-  if (spots.length > 0 && looksLikeEchoedExample(spots)) {
-    if (diag) diag.flower_ja_source = 'echo検出→季節フォールバック';
-    spots = [];
-  }
-
-  if (spots.length === 0) {
-    spots = getFallbackSpots(month, penalty);
-    memo  = weatherJA + 'の一日、見頃の花をチェック。';
-    if (diag && !diag.flower_ja_source) diag.flower_ja_source = 'フォールバック（Gemini失敗）';
-  } else {
-    if (diag) diag.flower_ja_source = diag.flower_ja_source || 'Gemini';
-  }
-
-  // スコアを整数に正規化（38.5% のような小数表示を防ぐ）
-  spots = spots.map(s => ({
-    name: s.name,
-    emoji: s.emoji || '🌸',
-    score: Math.max(10, Math.min(100, Math.round(Number(s.score) || 10))),
-  }));
-
-  const ranked = spots.slice().sort((a, b) => b.score - a.score);
-
-  // nameW: スポット名の重み上限 / memoW: メモの重み上限 / count: 掲載件数
+function buildFlowerTweetText(dateLabel, ranked, memo) {
   const build = (nameW, memoW, count) => {
     let t = '花畑指数【' + dateLabel + '】\n';
     for (const s of ranked.slice(0, count)) {
@@ -309,16 +175,16 @@ async function buildFlowerTweetJA(apiKey, dateLabel, sakura, flowers, weatherJA,
 
   // 段階的に削りながら、最初に収まったものを採用
   const plans = [
-    [30, 44, 5], [26, 36, 5], [24, 28, 5],
-    [22, 20, 5], [22,  0, 5], [20,  0, 5],
-    [20,  0, 4], [18,  0, 4], [18,  0, 3],
+    [30, 44, 3], [26, 36, 3], [24, 28, 3],
+    [22, 20, 3], [22,  0, 3], [20,  0, 3],
+    [18,  0, 2],
   ];
   for (const [nameW, memoW, count] of plans) {
     const t = build(nameW, memoW, count);
     if (weightedLength(t) <= X_TARGET) return t;
   }
   // 最終手段：最小構成をさらに強制的に切り詰める
-  return clipWeighted(build(16, 0, 3), X_LIMIT);
+  return clipWeighted(build(16, 0, 2), X_LIMIT);
 }
 
 // ============================================================
@@ -388,22 +254,15 @@ function describeXError(err, text, attempts) {
     + ' | attempts:' + attempts;
 }
 
-
 // ============================================================
-// X投稿への画像添付（2026-09 追加）
-//
+// X投稿への画像添付
 //  Instagram側と同じ「連番フォルダ + Redisローテーション」方式。
 //  スポット名と写真の厳密な一致は求めない（写真の枚数に対して
 //  スポット候補数の方が多いため）。カテゴリ単位で順番に使い回す。
 // ============================================================
-// ファイル名は連番だが 5桁・カテゴリごとに開始番号が違う実物に合わせる
-//   富士山: 00101, 00102, ...   花: 00201, 00202, ...   星: 00301, 00302, ...
-// ファイル名は「接頭辞（漢字）+ 5桁連番」の実物に合わせる
-//   花: 花00201.jpg〜   富士山: 富士00101.jpg〜   星: 星00301.jpg〜
+// ファイル名は「接頭辞（漢字）+ 5桁連番」の実物に合わせる: 花00201.jpg〜
 const IMAGE_CATEGORIES = {
   flower: { path: 'flower', count: parseInt(process.env.FLOWER_IMAGE_COUNT || '17'), startNum: 201, prefix: '花' },
-  fuji:   { path: 'fuji',   count: parseInt(process.env.FUJI_IMAGE_COUNT   || '11'), startNum: 101, prefix: '富士山' },
-  star:   { path: 'star',   count: parseInt(process.env.STAR_IMAGE_COUNT  || '8'),  startNum: 301, prefix: '星' },
 };
 
 function buildPhotoUrl(category, index) {
@@ -512,9 +371,6 @@ export async function GET(request) {
     //   post-dailyで雲海指数が2回投稿された事故（check-then-act構造の
     //   race condition）と同型の事故を防ぐため、他の2ファイルと同じく
     //   投稿処理前にredis SET NXで原子的に「今日の枠」を予約する。
-    //   旧実装はこのファイルに当日重複チェック自体が存在せず、Xの同一
-    //   文面判定だけに頼っていたが、天気で文面が毎回変わるため
-    //   cronの二重起動を防げていなかった。
     if (!dryRun && !force) {
       const claimed = await redis.set('morning_posted_date', todayStr, { nx: true, ex: 82800 });
       if (claimed === null) {
@@ -528,15 +384,33 @@ export async function GET(request) {
 
     const API_KEY     = process.env.GEMINI_API_KEY;
     const dateLabel   = getTodayLabel();
-    const sakura      = isSakuraSeason();
-    const flowers     = getSeasonalFlowers();
-    const weather     = await getDaytimeWeather();
-    report.weather = weather.weatherJA;
+    const jstNow      = new Date(Date.now() + 9 * 3600000);
+    const curMonth    = jstNow.getMonth() + 1;
 
-    const jstNow     = new Date(Date.now() + 9 * 3600000);
-    const curMonth   = jstNow.getUTCMonth() + 1;
-    const tweetJA    = await buildFlowerTweetJA(API_KEY, dateLabel, sakura, flowers, weather.weatherJA, weather.penalty, weather.max, curMonth, report);
+    // ★ スコアはOpen-Meteo連動でコード側が決定的に算出する
+    //  （migoron-scoring.js）。候補スポットは月別の固定リストから選び、
+    //   Geminiにはスコア・天気を渡さずメモ文だけを書かせる。
+    let scored, scoreSource;
+    try {
+      scored = await computeFlowerScores(curMonth);
+      if (!scored.every(s => s.ok)) throw new Error('一部スポットの天気取得に失敗');
+      scoreSource = 'open-meteo';
+    } catch (e) {
+      const spots = getFlowerSpotsForMonth(curMonth);
+      scored = spots.map(s => ({ ...s, score: s.baseScore, ok: false }));
+      scoreSource = 'フォールバック（Open-Meteo取得失敗、季節ベーススコアを使用: ' + e.message + '）';
+    }
 
+    const ranked = scored.slice().sort((a, b) => b.score - a.score);
+    const avgScore = Math.round(ranked.reduce((s, x) => s + x.score, 0) / ranked.length);
+    // 参考情報としての今日の天気（メモ生成用。スコアはscoredに反映済み）
+    const weatherJA = avgScore >= 70 ? '穏やかな天気' : avgScore >= 45 ? 'やや崩れ気味の天気' : '荒れ気味の天気';
+
+    const memo = await buildMemo(API_KEY, ranked, avgScore, weatherJA);
+    const tweetJA = buildFlowerTweetText(dateLabel, ranked, memo);
+
+    report.weather = weatherJA;
+    report.scoreSource = scoreSource;
     // 重み付き文字数を必ず記録（超過していれば一目で分かる）
     report.lengths = {
       flower_ja: { weighted: weightedLength(tweetJA), raw: tweetJA.length },
@@ -549,8 +423,9 @@ export async function GET(request) {
       return new Response(JSON.stringify({
         message: 'Dry run（投稿していません）',
         tweets: {
-          flower_ja: { weighted: weightedLength(tweetJA), text: tweetJA },
+          flower_ja: { weighted: weightedLength(tweetJA), text: tweetJA, scores: scored },
         },
+        scoreSource,
         report,
       }, null, 2), { status: 200, headers: jsonHeaders });
     }
