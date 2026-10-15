@@ -1,0 +1,58 @@
+{
+  "_note": "改善指示書P2: スポットのマスタデータ。緯度経度・見頃期間は可能な限り正確なものを設定したが、現地確認はしていない。needsReviewがtrueのものは実在性・座標の確認優先度が高い。花のbloomFrom/bloomToは月日(MM-DD)で、冬をまたぐもの(水仙・蝋梅)はfrom>toで年またぎを表す。",
+  "spots": [
+    { "id": "unkai-01", "name": "竹田城跡", "pref": "兵庫", "lat": 35.3011, "lon": 134.8186, "type": "unkai", "needsReview": false },
+    { "id": "unkai-02", "name": "高ボッチ高原", "pref": "長野", "lat": 36.1217, "lon": 137.9686, "type": "unkai", "needsReview": false },
+    { "id": "unkai-03", "name": "山中湖パノラマ台", "pref": "山梨", "lat": 35.4336, "lon": 138.9439, "type": "unkai", "needsReview": false },
+
+    { "id": "fuji-01", "name": "田貫湖", "pref": "静岡", "lat": 35.3306, "lon": 138.6253, "type": "fuji", "reflection": true, "needsReview": false },
+    { "id": "fuji-02", "name": "新道峠", "pref": "山梨", "lat": 35.4886, "lon": 138.7858, "type": "fuji", "reflection": false, "needsReview": false },
+    { "id": "fuji-03", "name": "山中湖パノラマ台", "pref": "山梨", "lat": 35.4336, "lon": 138.9439, "type": "fuji", "reflection": true, "needsReview": false },
+
+    { "id": "star-01", "name": "河口湖", "pref": "山梨", "lat": 35.5171, "lon": 138.7519, "type": "star", "needsReview": false },
+    { "id": "star-02", "name": "爪木崎", "pref": "静岡", "lat": 34.6726, "lon": 138.9536, "type": "star", "needsReview": false },
+    { "id": "star-03", "name": "大洗", "pref": "茨城", "lat": 36.3133, "lon": 140.5750, "type": "star", "needsReview": false },
+    { "id": "star-04", "name": "三浦", "pref": "神奈川", "lat": 35.1439, "lon": 139.6178, "type": "star", "needsReview": false },
+    { "id": "star-05", "name": "秩父", "pref": "埼玉", "lat": 35.9915, "lon": 139.0856, "type": "star", "needsReview": false },
+
+    { "id": "flower-01", "name": "熱海梅園", "pref": "静岡", "lat": 35.0958, "lon": 139.0661, "type": "flower", "flowerType": "梅", "emoji": "🌸", "bloomFrom": "01-05", "bloomTo": "02-20", "baseScore": 70, "needsReview": false },
+    { "id": "flower-02", "name": "吾妻山公園", "pref": "神奈川", "lat": 35.2994, "lon": 139.2461, "type": "flower", "flowerType": "菜の花", "emoji": "🌼", "bloomFrom": "01-01", "bloomTo": "02-15", "baseScore": 65, "needsReview": true },
+    { "id": "flower-03", "name": "小石川後楽園", "pref": "東京", "lat": 35.7056, "lon": 139.7494, "type": "flower", "flowerType": "梅", "emoji": "🌸", "bloomFrom": "01-20", "bloomTo": "03-01", "baseScore": 58, "needsReview": true },
+
+    { "id": "flower-04", "name": "偕楽園", "pref": "茨城", "lat": 36.3722, "lon": 140.4642, "type": "flower", "flowerType": "梅", "emoji": "🌸", "bloomFrom": "02-10", "bloomTo": "03-10", "baseScore": 85, "needsReview": false },
+    { "id": "flower-05", "name": "越生梅林", "pref": "埼玉", "lat": 35.9661, "lon": 139.2967, "type": "flower", "flowerType": "梅", "emoji": "🌸", "bloomFrom": "02-10", "bloomTo": "03-10", "baseScore": 78, "needsReview": true },
+
+    { "id": "flower-06", "name": "権現堂堤", "pref": "埼玉", "lat": 36.0786, "lon": 139.7183, "type": "flower", "flowerType": "桜", "emoji": "🌸", "bloomFrom": "03-20", "bloomTo": "04-10", "baseScore": 88, "needsReview": false },
+    { "id": "flower-07", "name": "小田原城址公園", "pref": "神奈川", "lat": 35.2564, "lon": 139.1550, "type": "flower", "flowerType": "桜", "emoji": "🌸", "bloomFrom": "03-20", "bloomTo": "04-08", "baseScore": 80, "needsReview": false },
+    { "id": "flower-08", "name": "千鳥ヶ淵", "pref": "東京", "lat": 35.6881, "lon": 139.7514, "type": "flower", "flowerType": "桜", "emoji": "🌸", "bloomFrom": "03-22", "bloomTo": "04-08", "baseScore": 74, "needsReview": false },
+
+    { "id": "flower-09", "name": "ひたち海浜公園", "pref": "茨城", "lat": 36.3997, "lon": 140.5986, "type": "flower", "flowerType": "ネモフィラ", "emoji": "💙", "bloomFrom": "04-15", "bloomTo": "05-10", "baseScore": 92, "needsReview": false },
+    { "id": "flower-10", "name": "あしかがフラワーパーク", "pref": "栃木", "lat": 36.3414, "lon": 139.4700, "type": "flower", "flowerType": "藤", "emoji": "💜", "bloomFrom": "04-15", "bloomTo": "05-10", "baseScore": 85, "needsReview": false },
+    { "id": "flower-11", "name": "根津神社", "pref": "東京", "lat": 35.7206, "lon": 139.7611, "type": "flower", "flowerType": "つつじ", "emoji": "🌺", "bloomFrom": "04-10", "bloomTo": "05-05", "baseScore": 76, "needsReview": false },
+
+    { "id": "flower-12", "name": "京成バラ園", "pref": "千葉", "lat": 35.7836, "lon": 140.1250, "type": "flower", "flowerType": "バラ", "emoji": "🌹", "bloomFrom": "05-10", "bloomTo": "06-05", "baseScore": 75, "needsReview": false },
+
+    { "id": "flower-13", "name": "明月院", "pref": "神奈川", "lat": 35.3331, "lon": 139.5458, "type": "flower", "flowerType": "アジサイ", "emoji": "💠", "bloomFrom": "06-05", "bloomTo": "07-05", "baseScore": 90, "needsReview": false },
+    { "id": "flower-14", "name": "本土寺", "pref": "千葉", "lat": 35.7961, "lon": 139.9103, "type": "flower", "flowerType": "アジサイ", "emoji": "💠", "bloomFrom": "06-05", "bloomTo": "07-05", "baseScore": 82, "needsReview": false },
+
+    { "id": "flower-15", "name": "座間ひまわり畑", "pref": "神奈川", "lat": 35.4878, "lon": 139.3978, "type": "flower", "flowerType": "ひまわり", "emoji": "🌻", "bloomFrom": "07-20", "bloomTo": "08-31", "baseScore": 88, "needsReview": true },
+    { "id": "flower-16", "name": "古河公方公園", "pref": "茨城", "lat": 36.1894, "lon": 139.7206, "type": "flower", "flowerType": "ハス", "emoji": "🪷", "bloomFrom": "07-05", "bloomTo": "08-10", "baseScore": 80, "needsReview": true },
+    { "id": "flower-17", "name": "清水公園", "pref": "千葉", "lat": 35.9394, "lon": 139.8886, "type": "flower", "flowerType": "ハス", "emoji": "🪷", "bloomFrom": "07-05", "bloomTo": "08-10", "baseScore": 72, "needsReview": true },
+
+    { "id": "flower-18", "name": "明野ひまわり畑", "pref": "山梨", "lat": 35.7400, "lon": 138.4600, "type": "flower", "flowerType": "ひまわり", "emoji": "🌻", "bloomFrom": "07-25", "bloomTo": "08-31", "baseScore": 78, "needsReview": true },
+    { "id": "flower-19", "name": "上野不忍池", "pref": "東京", "lat": 35.7141, "lon": 139.7728, "type": "flower", "flowerType": "ハス", "emoji": "🪷", "bloomFrom": "07-10", "bloomTo": "08-20", "baseScore": 70, "needsReview": false },
+
+    { "id": "flower-20", "name": "巾着田曼珠沙華公園", "pref": "埼玉", "lat": 35.9442, "lon": 139.2744, "type": "flower", "flowerType": "彼岸花", "emoji": "🌺", "bloomFrom": "09-15", "bloomTo": "09-30", "baseScore": 90, "needsReview": false },
+    { "id": "flower-21", "name": "ひたち海浜公園（コキア）", "pref": "茨城", "lat": 36.3997, "lon": 140.5986, "type": "flower", "flowerType": "コキア", "emoji": "🍂", "bloomFrom": "09-25", "bloomTo": "10-20", "baseScore": 92, "needsReview": false },
+    { "id": "flower-22", "name": "くりはま花の国", "pref": "神奈川", "lat": 35.2211, "lon": 139.6700, "type": "flower", "flowerType": "コスモス", "emoji": "🌼", "bloomFrom": "09-01", "bloomTo": "10-25", "baseScore": 74, "needsReview": false },
+    { "id": "flower-23", "name": "昭和記念公園", "pref": "東京", "lat": 35.7014, "lon": 139.4089, "type": "flower", "flowerType": "コスモス", "emoji": "🌼", "bloomFrom": "09-01", "bloomTo": "10-20", "baseScore": 82, "needsReview": false },
+
+    { "id": "flower-24", "name": "高尾山", "pref": "東京", "lat": 35.6253, "lon": 139.2431, "type": "flower", "flowerType": "紅葉", "emoji": "🍁", "bloomFrom": "11-05", "bloomTo": "12-05", "baseScore": 90, "needsReview": false },
+    { "id": "flower-25", "name": "新宿御苑", "pref": "東京", "lat": 35.6852, "lon": 139.7100, "type": "flower", "flowerType": "紅葉", "emoji": "🍁", "bloomFrom": "11-10", "bloomTo": "12-05", "baseScore": 80, "needsReview": true },
+    { "id": "flower-26", "name": "長瀞", "pref": "埼玉", "lat": 36.1206, "lon": 139.1086, "type": "flower", "flowerType": "紅葉", "emoji": "🍁", "bloomFrom": "11-05", "bloomTo": "11-30", "baseScore": 74, "needsReview": false },
+
+    { "id": "flower-27", "name": "六義園", "pref": "東京", "lat": 35.7306, "lon": 139.7467, "type": "flower", "flowerType": "紅葉", "emoji": "🍁", "bloomFrom": "11-20", "bloomTo": "12-10", "baseScore": 72, "needsReview": false },
+    { "id": "flower-28", "name": "明治神宮外苑", "pref": "東京", "lat": 35.6761, "lon": 139.7186, "type": "flower", "flowerType": "イチョウ", "emoji": "🍂", "bloomFrom": "11-15", "bloomTo": "12-05", "baseScore": 64, "needsReview": false },
+    { "id": "flower-29", "name": "爪木崎", "pref": "静岡", "lat": 34.6726, "lon": 138.9536, "type": "flower", "flowerType": "水仙", "emoji": "🌼", "bloomFrom": "12-15", "bloomTo": "01-25", "baseScore": 56, "needsReview": false }
+  ]
+}
