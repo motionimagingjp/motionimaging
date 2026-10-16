@@ -220,10 +220,34 @@ export function moonAdjustment(age) {
   return 5;
 }
 
-// 雲量・天気コード・月齢に加え、湿度（透明度の目安）と降水確率を反映する
-export function scoreStar({ worstCode, cloudAvg, humidityAvg, precipProbMax, moonAdj }) {
-  const cloudScore = 100 - cloudAvg * 0.9;
-  let score = Math.min(cloudScore, weatherCap(worstCode)) + moonAdj;
+// 1時間ごとの星の見えやすさ。天気コード0〜3（快晴〜曇り）はOpen-Meteo側で
+// 雲量から決まる値なので雲量だけで評価し、霧・雨・雪など雲量に関係なく
+// 星が見えない天気（コード45以上）にだけ上限を掛ける。
+// （以前は夜間9時間の天気コードの最悪値で上限を掛けていたため、1時間でも
+// 曇りが混ざると全地点が35%に張り付いていた）
+function hourlySkyScore(code, cloud) {
+  const base = 100 - cloud * 0.9;
+  return code >= 45 ? Math.min(base, weatherCap(code)) : base;
+}
+
+// 撮影には夜通し晴れる必要はないため、夜間(19〜翌3時)で最も条件の良い
+// 連続した時間帯で評価する。
+const STAR_WINDOW_HOURS = 3;
+
+function bestStarWindow(h, idx) {
+  const hourly = idx.map(i => hourlySkyScore(Number(h.weathercode[i]), Number(h.cloudcover[i])));
+  const size = Math.min(STAR_WINDOW_HOURS, idx.length);
+  let bestStart = 0, bestAvg = -Infinity;
+  for (let s = 0; s + size <= idx.length; s++) {
+    const a = avg(hourly.slice(s, s + size));
+    if (a > bestAvg) { bestAvg = a; bestStart = s; }
+  }
+  return { skyScore: bestAvg, windowIdx: idx.slice(bestStart, bestStart + size) };
+}
+
+// 晴れ間の見えやすさ・月齢に加え、湿度（透明度の目安）と降水確率を反映する
+export function scoreStar({ skyScore, humidityAvg, precipProbMax, moonAdj }) {
+  let score = skyScore + moonAdj;
   score += humidityAvg >= 90 ? -10 : humidityAvg <= 50 ? 5 : 0;
   score += precipProbMax >= 30 ? -15 : precipProbMax >= 10 ? -5 : 0;
   return clampScore(score);
@@ -240,12 +264,13 @@ export async function computeStarScores(moonAdj) {
     if (!h) return { ...spot, score: 10, ok: false };
     const idx = nightIndices(h.time);
     if (!idx.length) return { ...spot, score: 10, ok: false };
-    const worstCode = Math.max(...pick(h.weathercode, idx));
-    const cloudAvg = avg(pick(h.cloudcover, idx));
-    const humidityAvg = avg(pick(h.relativehumidity_2m, idx));
-    const precipProbMax = Math.max(...pick(h.precipitation_probability, idx));
-    const score = scoreStar({ worstCode, cloudAvg, humidityAvg, precipProbMax, moonAdj });
-    return { ...spot, score, ok: true, worstCode, cloudAvg: Math.round(cloudAvg) };
+    const { skyScore, windowIdx } = bestStarWindow(h, idx);
+    const humidityAvg = avg(pick(h.relativehumidity_2m, windowIdx));
+    const precipProbMax = Math.max(...pick(h.precipitation_probability, windowIdx));
+    const score = scoreStar({ skyScore, humidityAvg, precipProbMax, moonAdj });
+    const hourOf = j => parseInt(String(h.time[j]).split('T')[1].slice(0, 2), 10);
+    const bestWindow = `${hourOf(windowIdx[0])}時〜${(hourOf(windowIdx[windowIdx.length - 1]) + 1) % 24}時`;
+    return { ...spot, score, ok: true, bestWindow, cloudAvg: Math.round(avg(pick(h.cloudcover, windowIdx))) };
   });
 }
 

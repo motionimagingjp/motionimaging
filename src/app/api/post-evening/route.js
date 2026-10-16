@@ -156,7 +156,7 @@ async function buildStarTweet(apiKey, dateLabel, moon, diag) {
     source = 'フォールバック（天気取得失敗・月齢のみ: ' + e.message + '）';
   }
   diag.source = source;
-  diag.weather = scored.map(s => `${s.name}:${s.score}%`).join('、');
+  diag.weather = scored.map(s => `${s.name}:${s.score}%` + (s.bestWindow ? `(${s.bestWindow}・雲量${s.cloudAvg}%)` : '')).join('、');
 
   const bestScore = Math.max(...scored.map(s => s.score));
 
@@ -175,6 +175,11 @@ async function buildStarTweet(apiKey, dateLabel, moon, diag) {
 
   if (!memo || memoContradictsScore(bestScore, memo)) {
     if (memo) diag.memoOverridden = `矛盾検出のため上書き: "${memo}"`;
+    memo = buildFallbackMemo(bestScore, moon);
+  } else if (weightedLength(memo) > 56) {
+    // 28文字の指示を超えたメモは本文組み立て時に「…」で途中切れするため、
+    // 文の途中で切らずに定型文に差し替える
+    diag.memoOverridden = `文字数超過のため上書き: "${memo}"`;
     memo = buildFallbackMemo(bestScore, moon);
   }
 
