@@ -15,6 +15,14 @@
 //   固定候補プールだった）。needsReview:trueは実在性・座標の確認優先度が
 //   高いスポット（本番投入前にJakeが確認すること）。
 //
+// 2026-10-16 改善指示書P3対応：
+//   投稿画像に季節タグ(IMAGE_SEASONS)を付け、投稿月の季節と一致する画像
+//   からのみロングテーションするようにした（seasonalIndices）。一致する
+//   季節の画像が無いカテゴリ・季節の組み合わせでは種別一致のみ（全件）
+//   にフォールバックする。季節は全47枚を実際に目視確認して判定したが、
+//   夜景・曇天・シルエットなどで季節の手がかりが乏しい画像はnull
+//   （季節を問わず使う）のままにしている。
+//
 // 【スポット座標について】
 // 緯度経度は既知の有名スポットとして可能な限り正確なものを設定したが、
 // 一覧CSV等での現地確認は行っていない。本番投入前にJakeが確認すること。
@@ -318,4 +326,42 @@ export async function computeFlowerScores(date) {
     });
     return { ...spot, score, ok: true };
   });
+}
+
+// ============================================================
+// 投稿画像の季節タグ（P3）
+//
+// post-images/配下の実ファイルを全数目視確認して判定した。キーは
+// ファイル名の連番部分（1始まり、IMAGE_CATEGORIESのstartNumからの
+// オフセットではなく「何枚目か」）。null は季節の手がかりが乏しい
+// （夜景・曇天・シルエットなど）ため、季節を問わず候補に残す画像。
+// ============================================================
+export const IMAGE_SEASONS = {
+  cloud: { 1: 'autumn', 2: 'autumn', 3: 'autumn', 4: 'autumn', 5: 'summer', 6: 'summer', 7: 'summer', 8: null, 9: null, 10: null, 11: null },
+  fuji:  { 1: 'winter', 2: 'winter', 3: 'winter', 4: 'winter', 5: 'spring', 6: 'spring', 7: 'summer', 8: 'summer', 9: 'spring', 10: 'winter', 11: null },
+  star:  { 1: 'summer', 2: 'summer', 3: 'summer', 4: 'summer', 5: 'winter', 6: null, 7: 'summer', 8: null },
+  flower: {
+    1: 'spring', 2: 'summer', 3: 'autumn', 4: 'autumn', 5: 'autumn', 6: 'autumn', 7: 'summer', 8: 'autumn',
+    9: 'spring', 10: 'summer', 11: 'summer', 12: 'spring', 13: 'autumn', 14: 'summer', 15: 'summer', 16: 'autumn', 17: 'spring',
+  },
+};
+
+export function currentSeasonJST() {
+  const m = new Date(Date.now() + 9 * 3600000).getMonth() + 1;
+  if (m >= 3 && m <= 5) return 'spring';
+  if (m >= 6 && m <= 8) return 'summer';
+  if (m >= 9 && m <= 11) return 'autumn';
+  return 'winter';
+}
+
+// 投稿月の季節に合う画像の0始まりindex一覧を返す（IMAGE_CATEGORIESの
+// count/startNumに対応するローテーション用index）。該当がなければ
+// 種別一致のみ（全件）にフォールバックする。
+export function seasonalIndices(category, count, season) {
+  const map = IMAGE_SEASONS[category] || {};
+  const matched = [];
+  for (let n = 1; n <= count; n++) {
+    if (map[n] === season) matched.push(n - 1);
+  }
+  return matched.length ? matched : Array.from({ length: count }, (_, i) => i);
 }

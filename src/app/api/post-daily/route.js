@@ -32,7 +32,7 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
-import { computeCloudAndFujiScores, CLOUD_SPOTS, FUJI_SPOTS } from '../_lib/migoron-scoring';
+import { computeCloudAndFujiScores, CLOUD_SPOTS, FUJI_SPOTS, currentSeasonJST, seasonalIndices } from '../_lib/migoron-scoring';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -201,12 +201,16 @@ function buildPhotoUrl(category, index) {
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/src/app/api/post-images/${category}/${cat.prefix}${num}${cat.ext || '.jpg'}`;
 }
 
+// 改善指示書P3: 投稿月の季節に合う画像だけをローテーション対象にする
+// （該当がなければ種別一致のみ＝全件にフォールバック）。
 async function getNextPhotoIndex(category) {
   const cat = IMAGE_CATEGORIES[category];
+  const candidates = seasonalIndices(category, cat.count, currentSeasonJST());
   const key = `x_photo_idx_${category}`;
   let current = await redis.get(key);
-  if (current === null || current === undefined) current = -1;
-  const next = (parseInt(current) + 1) % cat.count;
+  current = (current === null || current === undefined) ? -1 : parseInt(current);
+  const pos = candidates.indexOf(current);
+  const next = candidates[(pos + 1) % candidates.length];
   return { next, key };
 }
 
