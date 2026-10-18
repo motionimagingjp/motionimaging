@@ -19,6 +19,11 @@
 //      取得し、コード側で決定的にスコアを算出する方式へ変更。
 //      Geminiにはメモ文のみを書かせ、スコアとの矛盾はコードで検出・上書きする。
 //
+// 2026-10-18 改善指示書P4/P5対応：
+//   P4: 投稿した指数を予測ログ(lib/prediction-log.js)に保存し、翌日
+//       /api/verify-predictions が答え合わせする。
+//   P5: 1行目を結論型フック、見出しに「出現期待度」を付ける。
+//
 // 2026-10-15 改善指示書P1対応：
 //   スコア算出ロジック（スポット座標・weatherCap・月齢補正）を
 //   src/app/api/_lib/migoron-scoring.js に集約（雲海・富士山と共通化）。
@@ -28,7 +33,9 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
-import { STAR_SPOTS, moonAdjustment, computeStarScores, currentSeasonJST, seasonalIndices } from '../_lib/migoron-scoring';
+import { savePredictions } from '../../../lib/prediction-log';
+import { STAR_SPOTS, moonAdjustment, computeStarScores, currentSeasonJST, seasonalIndices, jstDateString } from '../_lib/migoron-scoring';
+import { buildHook, SCORE_LABELS } from '../_lib/migoron-format';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -146,6 +153,9 @@ async function buildStarTweet(apiKey, dateLabel, moon, diag) {
     scored = await computeStarScores(moonAdj);
     if (!scored.every(s => s.ok)) throw new Error('一部スポットの天気取得に失敗');
     source = '天気連動（open-meteo）';
+    // 答え合わせ(P4)は天気連動で算出できた回だけ記録する
+    diag.logItems = scored;
+    diag.moonAdj = moonAdj;
   } catch (e) {
     // 天気取得に失敗した場合のみ月齢ベースにフォールバック
     const base = moon.age <= 7 ? 80 : moon.age <= 17 ? 55 : 70;
@@ -186,7 +196,8 @@ async function buildStarTweet(apiKey, dateLabel, moon, diag) {
   const ranked = scored.slice().sort((a, b) => b.score - a.score);
 
   const build = (nameW, memoW) => {
-    let t = '今夜星指数予報【' + dateLabel + '】\n';
+    let t = clipWeighted(buildHook('star', ranked), 48) + '\n';
+    t += '今夜星指数予報【' + dateLabel + '】' + SCORE_LABELS.star + '\n';
     for (const s of ranked) t += '✨ ' + clipWeighted(s.name, nameW) + '(' + s.score + '%)\n';
     if (memoW > 0) t += 'ミゴロンメモ：' + clipWeighted(memo, memoW) + '\n';
     t += '#星空撮影 #風景写真 #ミゴロン';
@@ -416,6 +427,9 @@ export async function GET(request) {
       report.result = 'ok (w:' + weightedLength(tweet) + (r.attempts > 1 ? `, ${r.attempts}回目で成功` : '') + ')';
       report.tweetId = r.id;
       await redis.set(todayKey, today, { ex: 82800 });
+      if (diag.logItems) {
+        report.predictionLogged = await savePredictions('star', jstDateString(0), diag.logItems, { moonAdj: diag.moonAdj, moonAge: moon.age });
+      }
       if (photoMeta && photoMeta.uploaded) await redis.set(photoMeta.photoKey, photoMeta.index);
     } else if (r.duplicate) {
       report.result = '重複のため投稿されず';

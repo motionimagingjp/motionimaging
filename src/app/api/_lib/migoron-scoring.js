@@ -61,23 +61,42 @@ function jstDateStr(d) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
-// dayOffset: 0=今日, 1=明日, -1=昨日（JST基準）。fromHour〜toHourの時間帯だけ抜き出す。
-// 日をまたぐ時間帯（例: 19時〜翌3時）はnightIndicesを使うこと。
-export function hourIndicesForOffset(times, dayOffset, fromHour, toHour) {
-  const jstNow = new Date(Date.now() + 9 * 3600000);
-  const targetStr = jstDateStr(new Date(jstNow.getTime() + dayOffset * 24 * 3600000));
+// JST基準の日付文字列（YYYY-MM-DD）。offsetDaysで今日からずらせる。
+export function jstDateString(offsetDays = 0) {
+  return jstDateStr(new Date(Date.now() + 9 * 3600000 + offsetDays * 86400000));
+}
+
+export function addDays(dateStr, n) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return jstDateStr(d);
+}
+
+// dateStr（YYYY-MM-DD）の fromHour〜toHour の時間帯だけ抜き出す。
+// 日をまたぐ時間帯（例: 19時〜翌3時）はnightIndicesForDateを使うこと。
+export function hourIndicesForDate(times, dateStr, fromHour, toHour) {
   const idx = [];
   times.forEach((t, i) => {
     const [datePart, timePart] = String(t).split('T');
     const hour = parseInt(String(timePart).slice(0, 2), 10);
-    if (datePart === targetStr && hour >= fromHour && hour <= toHour) idx.push(i);
+    if (datePart === dateStr && hour >= fromHour && hour <= toHour) idx.push(i);
   });
   return idx;
 }
 
-// 今夜19時〜翌3時（星空指数が対象とする夜間帯）
+// dayOffset: 0=今日, 1=明日, -1=昨日（JST基準）
+export function hourIndicesForOffset(times, dayOffset, fromHour, toHour) {
+  return hourIndicesForDate(times, jstDateString(dayOffset), fromHour, toHour);
+}
+
+// dateStrの夜19時〜翌3時（星空指数が対象とする夜間帯）
+export function nightIndicesForDate(times, dateStr) {
+  return [...hourIndicesForDate(times, dateStr, 19, 23), ...hourIndicesForDate(times, addDays(dateStr, 1), 0, 3)];
+}
+
+// 今夜19時〜翌3時
 export function nightIndices(times) {
-  return [...hourIndicesForOffset(times, 0, 19, 23), ...hourIndicesForOffset(times, 1, 0, 3)];
+  return nightIndicesForDate(times, jstDateString(0));
 }
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null; }
@@ -124,66 +143,91 @@ export function scoreFuji({ dawnWeatherCode, cloudLowAvg, cloudMidAvg, cloudHigh
   return clampScore(score);
 }
 
-async function nightlyExtremes(spots, offsetFromHour, offsetToHour, dayOffset) {
+// 対象日(dateStr)の早朝5〜7時の気象要素を取り出す。diurnalRangeの基準となる
+// 前日最高気温は「対象日の前日」（明日早朝なら今日）の日最高気温を使う。
+function extractDawnMetrics(entry, dateStr) {
+  const h = entry.hourly;
+  if (!h) return null;
+  const idx = hourIndicesForDate(h.time, dateStr, 5, 7);
+  if (!idx.length) return null;
+  const d = entry.daily;
+  const prevIdx = d && d.time ? d.time.indexOf(addDays(dateStr, -1)) : -1;
+  const prevMax = prevIdx >= 0 ? Number(d.temperature_2m_max[prevIdx]) : NaN;
+  return {
+    weatherCode: Math.max(...pick(h.weathercode, idx)),
+    cloudAvg: avg(pick(h.cloudcover, idx)),
+    cloudLowAvg: avg(pick(h.cloudcover_low, idx)),
+    cloudMidAvg: avg(pick(h.cloudcover_mid, idx)),
+    cloudHighAvg: avg(pick(h.cloudcover_high, idx)),
+    humidityAvg: avg(pick(h.relativehumidity_2m, idx)),
+    windAvg: avg(pick(h.windspeed_10m, idx)),
+    visibilityAvg: avg(pick(h.visibility, idx)),
+    tempMin: Math.min(...pick(h.temperature_2m, idx)),
+    yesterdayMaxTemp: Number.isFinite(prevMax) ? prevMax : null,
+  };
+}
+
+const DAWN_HOURLY = ['weathercode', 'cloudcover', 'cloudcover_low', 'cloudcover_mid', 'cloudcover_high',
+  'relativehumidity_2m', 'windspeed_10m', 'visibility', 'temperature_2m'];
+
+async function fetchDawnMetrics(spots, dateStr, { pastDays = 1, forecastDays = 2 } = {}) {
   const list = await fetchOpenMeteo({
-    spots,
-    hourly: ['weathercode', 'cloudcover', 'cloudcover_low', 'cloudcover_mid', 'cloudcover_high',
-      'relativehumidity_2m', 'windspeed_10m', 'visibility', 'temperature_2m'],
-    daily: ['temperature_2m_max'],
-    pastDays: 1,
-    forecastDays: 2,
+    spots, hourly: DAWN_HOURLY, daily: ['temperature_2m_max'], pastDays, forecastDays,
   });
-  return list.map(entry => {
-    const h = entry.hourly;
-    const idx = hourIndicesForOffset(h.time, dayOffset, offsetFromHour, offsetToHour);
-    if (!idx.length) return null;
-    return {
-      weatherCode: Math.max(...pick(h.weathercode, idx)),
-      cloudAvg: avg(pick(h.cloudcover, idx)),
-      cloudLowAvg: avg(pick(h.cloudcover_low, idx)),
-      cloudMidAvg: avg(pick(h.cloudcover_mid, idx)),
-      cloudHighAvg: avg(pick(h.cloudcover_high, idx)),
-      humidityAvg: avg(pick(h.relativehumidity_2m, idx)),
-      windAvg: avg(pick(h.windspeed_10m, idx)),
-      visibilityAvg: avg(pick(h.visibility, idx)),
-      tempMin: Math.min(...pick(h.temperature_2m, idx)),
-      // daily配列は past_days=1 により [昨日, 今日, 明日]
-      yesterdayMaxTemp: entry.daily && entry.daily.temperature_2m_max ? Number(entry.daily.temperature_2m_max[0]) : null,
-    };
+  return list.map(entry => extractDawnMetrics(entry, dateStr));
+}
+
+function cloudScoreFromMetrics(e) {
+  return scoreCloudSea({
+    dawnWeatherCode: e.weatherCode,
+    dawnWindAvg: e.windAvg,
+    dawnHumidityAvg: e.humidityAvg,
+    diurnalRange: e.yesterdayMaxTemp - e.tempMin,
   });
+}
+
+function fujiScoreFromMetrics(e, reflection) {
+  return scoreFuji({
+    dawnWeatherCode: e.weatherCode,
+    cloudLowAvg: e.cloudLowAvg,
+    cloudMidAvg: e.cloudMidAvg,
+    cloudHighAvg: e.cloudHighAvg,
+    visibilityAvg: e.visibilityAvg,
+    humidityAvg: e.humidityAvg,
+    windAvg: e.windAvg,
+    reflection,
+  });
+}
+
+const r1 = n => (n == null || !Number.isFinite(n) ? null : Math.round(n * 10) / 10);
+
+// 予測ログ（P4）に残す「元の天気要素」
+function cloudInputs(e) {
+  return { weatherCode: e.weatherCode, windAvg: r1(e.windAvg), humidityAvg: r1(e.humidityAvg), diurnalRange: r1(e.yesterdayMaxTemp - e.tempMin) };
+}
+function fujiInputs(e) {
+  return {
+    weatherCode: e.weatherCode, cloudLow: r1(e.cloudLowAvg), cloudMid: r1(e.cloudMidAvg), cloudHigh: r1(e.cloudHighAvg),
+    visibilityKm: r1(e.visibilityAvg / 1000), humidityAvg: r1(e.humidityAvg), windAvg: r1(e.windAvg),
+  };
 }
 
 // 雲海・富士山まとめて算出（post-daily用）。明日早朝(5〜7時)のデータを使う。
 export async function computeCloudAndFujiScores() {
-  const cloudExtremes = await nightlyExtremes(CLOUD_SPOTS, 5, 7, 1);
-  const fujiExtremes = await nightlyExtremes(FUJI_SPOTS, 5, 7, 1);
+  const targetDate = jstDateString(1);
+  const cloudExtremes = await fetchDawnMetrics(CLOUD_SPOTS, targetDate);
+  const fujiExtremes = await fetchDawnMetrics(FUJI_SPOTS, targetDate);
 
   const cloudScores = CLOUD_SPOTS.map((spot, i) => {
     const e = cloudExtremes[i];
     if (!e || e.yesterdayMaxTemp === null) return { ...spot, score: 10, ok: false };
-    const score = scoreCloudSea({
-      dawnWeatherCode: e.weatherCode,
-      dawnWindAvg: e.windAvg,
-      dawnHumidityAvg: e.humidityAvg,
-      diurnalRange: e.yesterdayMaxTemp - e.tempMin,
-    });
-    return { ...spot, score, ok: true };
+    return { ...spot, score: cloudScoreFromMetrics(e), ok: true, inputs: cloudInputs(e) };
   });
 
   const fujiScores = FUJI_SPOTS.map((spot, i) => {
     const e = fujiExtremes[i];
     if (!e) return { ...spot, score: 10, ok: false };
-    const score = scoreFuji({
-      dawnWeatherCode: e.weatherCode,
-      cloudLowAvg: e.cloudLowAvg,
-      cloudMidAvg: e.cloudMidAvg,
-      cloudHighAvg: e.cloudHighAvg,
-      visibilityAvg: e.visibilityAvg,
-      humidityAvg: e.humidityAvg,
-      windAvg: e.windAvg,
-      reflection: spot.reflection,
-    });
-    return { ...spot, score, ok: true };
+    return { ...spot, score: fujiScoreFromMetrics(e, spot.reflection), ok: true, inputs: fujiInputs(e) };
   });
 
   return { cloudScores, fujiScores };
@@ -253,6 +297,25 @@ export function scoreStar({ skyScore, humidityAvg, precipProbMax, moonAdj }) {
   return clampScore(score);
 }
 
+// 夜間の時間帯idxから、最も条件の良い連続時間帯を選んで指数を出す。
+// precipProbOf(windowIdx) は降水確率(%)を返す（予報は precipitation_probability、
+// 実測の答え合わせは降水量から換算するため、取得方法だけ呼び出し側で切り替える）。
+function evaluateStarSpot(h, idx, moonAdj, precipProbOf) {
+  const { skyScore, windowIdx } = bestStarWindow(h, idx);
+  const humidityAvg = avg(pick(h.relativehumidity_2m, windowIdx));
+  const precipProbMax = precipProbOf(windowIdx);
+  const score = scoreStar({ skyScore, humidityAvg, precipProbMax, moonAdj });
+  const hourOf = j => parseInt(String(h.time[j]).split('T')[1].slice(0, 2), 10);
+  const bestWindow = `${hourOf(windowIdx[0])}時〜${(hourOf(windowIdx[windowIdx.length - 1]) + 1) % 24}時`;
+  return {
+    score, bestWindow,
+    cloudAvg: Math.round(avg(pick(h.cloudcover, windowIdx))),
+    humidityAvg: r1(humidityAvg), precipProbMax,
+  };
+}
+
+const finiteMax = arr => (arr.length ? Math.max(...arr) : 0);
+
 export async function computeStarScores(moonAdj) {
   const list = await fetchOpenMeteo({
     spots: STAR_SPOTS,
@@ -264,13 +327,11 @@ export async function computeStarScores(moonAdj) {
     if (!h) return { ...spot, score: 10, ok: false };
     const idx = nightIndices(h.time);
     if (!idx.length) return { ...spot, score: 10, ok: false };
-    const { skyScore, windowIdx } = bestStarWindow(h, idx);
-    const humidityAvg = avg(pick(h.relativehumidity_2m, windowIdx));
-    const precipProbMax = Math.max(...pick(h.precipitation_probability, windowIdx));
-    const score = scoreStar({ skyScore, humidityAvg, precipProbMax, moonAdj });
-    const hourOf = j => parseInt(String(h.time[j]).split('T')[1].slice(0, 2), 10);
-    const bestWindow = `${hourOf(windowIdx[0])}時〜${(hourOf(windowIdx[windowIdx.length - 1]) + 1) % 24}時`;
-    return { ...spot, score, ok: true, bestWindow, cloudAvg: Math.round(avg(pick(h.cloudcover, windowIdx))) };
+    const e = evaluateStarSpot(h, idx, moonAdj, w => finiteMax(pick(h.precipitation_probability, w)));
+    return {
+      ...spot, score: e.score, ok: true, bestWindow: e.bestWindow, cloudAvg: e.cloudAvg,
+      inputs: { cloudAvg: e.cloudAvg, humidityAvg: e.humidityAvg, precipProbMax: e.precipProbMax, bestWindow: e.bestWindow },
+    };
   });
 }
 
@@ -317,7 +378,7 @@ export function getFlowerSpotsForDate(date) {
     matched = after.length ? after : before;
   }
   matched = matched.slice().sort((a, b) => b.baseScore - a.baseScore).slice(0, 3);
-  return matched.map(s => ({ name: displayName(s), emoji: s.emoji, baseScore: s.baseScore, lat: s.lat, lon: s.lon }));
+  return matched.map(s => ({ name: displayName(s), flowerType: s.flowerType, emoji: s.emoji, baseScore: s.baseScore, lat: s.lat, lon: s.lon }));
 }
 
 // 直近の雨・高温・強風で減点する
@@ -343,13 +404,18 @@ export async function computeFlowerScores(date) {
     if (!d) return { ...spot, score: spot.baseScore, ok: false };
     // past_days=2, forecast_days=1 → daily配列は [一昨日, 昨日, 今日]
     const todayIdx = d.time.length - 1;
+    const inputs = {
+      maxTemp: Number(d.temperature_2m_max[todayIdx]),
+      pastRainSums: d.precipitation_sum.slice(0, todayIdx).map(Number),
+      windMax: Number(d.windspeed_10m_max[todayIdx]),
+    };
     const score = scoreFlower({
       baseScore: spot.baseScore,
-      todayMaxTemp: Number(d.temperature_2m_max[todayIdx]),
-      pastRainSums: d.precipitation_sum.slice(0, todayIdx).map(Number),
-      todayWindMax: Number(d.windspeed_10m_max[todayIdx]),
+      todayMaxTemp: inputs.maxTemp,
+      pastRainSums: inputs.pastRainSums,
+      todayWindMax: inputs.windMax,
     });
-    return { ...spot, score, ok: true };
+    return { ...spot, score, ok: true, inputs };
   });
 }
 
@@ -389,4 +455,76 @@ export function seasonalIndices(category, count, season) {
     if (map[n] === season) matched.push(n - 1);
   }
   return matched.length ? matched : Array.from({ length: count }, (_, i) => i);
+}
+
+
+// ============================================================
+// 答え合わせ（P4）: 過去日の「実測に近い値」から同じ式で指数を再計算する
+//
+// Open-Meteoの予報API（past_days）は過去の時間帯について予報モデルの
+// 解析値を返す。観測所の実測値ではないが、予報との差（外れ）を日々
+// 追うには十分なので、これを実測の代わりに使う。降水確率は実測が
+// 存在しないため、降水量が0.1mm以上の時間があれば100%、なければ0%
+// として扱う。
+// ============================================================
+export const GOOD_THRESHOLD = 60; // この指数以上を「見られる（良い）」と判定する
+
+const OBSERVE_PAST_DAYS = 7;
+
+// items: 予測ログのitems（name/lat/lon/score + 種別ごとの付帯情報）
+// 戻り値: itemsと同じ順序の [{ observedScore, ok }]
+export async function observeScores(kind, items, dateStr, meta = {}) {
+  if (kind === 'star') {
+    const list = await fetchOpenMeteo({
+      spots: items,
+      hourly: ['weathercode', 'cloudcover', 'relativehumidity_2m', 'precipitation'],
+      pastDays: OBSERVE_PAST_DAYS, forecastDays: 2,
+    });
+    return items.map((_, i) => {
+      const h = list[i] && list[i].hourly;
+      const idx = h ? nightIndicesForDate(h.time, dateStr) : [];
+      if (!idx.length) return { observedScore: null, ok: false };
+      const e = evaluateStarSpot(h, idx, meta.moonAdj || 0,
+        w => (finiteMax(pick(h.precipitation, w)) >= 0.1 ? 100 : 0));
+      return { observedScore: e.score, ok: true };
+    });
+  }
+
+  if (kind === 'cloud' || kind === 'fuji') {
+    const metrics = await fetchDawnMetrics(items, dateStr, { pastDays: OBSERVE_PAST_DAYS, forecastDays: 1 });
+    return items.map((item, i) => {
+      const e = metrics[i];
+      if (!e) return { observedScore: null, ok: false };
+      if (kind === 'cloud') {
+        if (e.yesterdayMaxTemp === null) return { observedScore: null, ok: false };
+        return { observedScore: cloudScoreFromMetrics(e), ok: true };
+      }
+      return { observedScore: fujiScoreFromMetrics(e, !!item.reflection), ok: true };
+    });
+  }
+
+  if (kind === 'flower') {
+    const list = await fetchOpenMeteo({
+      spots: items,
+      daily: ['temperature_2m_max', 'precipitation_sum', 'windspeed_10m_max'],
+      pastDays: OBSERVE_PAST_DAYS, forecastDays: 1,
+    });
+    return items.map((item, i) => {
+      const d = list[i] && list[i].daily;
+      const di = d && d.time ? d.time.indexOf(dateStr) : -1;
+      if (di < 0) return { observedScore: null, ok: false };
+      const rain = d.precipitation_sum.slice(Math.max(0, di - 2), di).map(Number);
+      return {
+        observedScore: scoreFlower({
+          baseScore: item.baseScore,
+          todayMaxTemp: Number(d.temperature_2m_max[di]),
+          pastRainSums: rain,
+          todayWindMax: Number(d.windspeed_10m_max[di]),
+        }),
+        ok: true,
+      };
+    });
+  }
+
+  throw new Error('unknown kind: ' + kind);
 }

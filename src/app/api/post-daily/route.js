@@ -32,7 +32,9 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
-import { computeCloudAndFujiScores, CLOUD_SPOTS, FUJI_SPOTS, currentSeasonJST, seasonalIndices } from '../_lib/migoron-scoring';
+import { savePredictions } from '../../../lib/prediction-log';
+import { computeCloudAndFujiScores, CLOUD_SPOTS, FUJI_SPOTS, currentSeasonJST, seasonalIndices, jstDateString } from '../_lib/migoron-scoring';
+import { buildHook, SCORE_LABELS } from '../_lib/migoron-format';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -158,9 +160,10 @@ async function buildMemo(apiKey, kind, title, ranked, avgScore, defaultTime) {
   return memo;
 }
 
-function buildTweetText(title, dateLabel, ranked, memo, time, hashtag) {
+function buildTweetText(kind, title, dateLabel, ranked, memo, time, hashtag) {
   const build = (nameW, memoW) => {
-    let t = `${title}指数【` + dateLabel + '】\n';
+    let t = clipWeighted(buildHook(kind, ranked), 48) + '\n';
+    t += `${title}指数【` + dateLabel + '】' + SCORE_LABELS[kind] + '\n';
     for (const s of ranked) t += s.emoji + ' ' + clipWeighted(s.name, nameW) + '(' + s.score + '%)\n';
     if (memoW > 0) t += 'ミゴロンメモ：' + clipWeighted(memo, memoW) + '\n';
     t += '⏰' + time + 'がベスト\n';
@@ -373,8 +376,8 @@ export async function GET(request) {
     const cloudMemo = await buildMemo(API_KEY, 'cloud', '雲海', cloudRanked, cloudAvg, '4:00〜6:00');
     const fujiMemo  = await buildMemo(API_KEY, 'fuji', '富士山', fujiRanked, fujiAvg, '5:00〜7:00');
 
-    const cloudSeaTweet = buildTweetText('雲海', dateLabel, cloudRanked, cloudMemo, '4:00〜6:00', '#雲海予報 #絶景 #ミゴロン');
-    const fujisanTweet  = buildTweetText('富士山', dateLabel, fujiRanked, fujiMemo, '5:00〜7:00', '#富士山 #風景写真 #ミゴロン');
+    const cloudSeaTweet = buildTweetText('cloud', '雲海', dateLabel, cloudRanked, cloudMemo, '4:00〜6:00', '#雲海予報 #絶景 #ミゴロン');
+    const fujisanTweet  = buildTweetText('fuji', '富士山', dateLabel, fujiRanked, fujiMemo, '5:00〜7:00', '#富士山 #風景写真 #ミゴロン');
 
     report.lengths = {
       cloud_sea: weightedLength(cloudSeaTweet),
@@ -430,6 +433,13 @@ export async function GET(request) {
       const r = await tweetWithRetry(xClient, text, 3, mediaId);
       if (r.ok) {
         report.x[key] = 'ok (w:' + weightedLength(text) + (r.attempts > 1 ? `, ${r.attempts}回目で成功` : '') + ')';
+        // 答え合わせ(P4)用に予測を保存（Open-Meteoで算出できた回のみ。対象日は明日）
+        if (scoreSource === 'open-meteo') {
+          report.predictionLogged = report.predictionLogged || {};
+          report.predictionLogged[key] = await savePredictions(
+            key === 'cloud_sea' ? 'cloud' : 'fuji', jstDateString(1),
+            key === 'cloud_sea' ? cloudScores : fujiScores);
+        }
         if (photoMeta && photoMeta.uploaded) await redis.set(photoMeta.photoKey, photoMeta.index);
       } else if (r.duplicate) {
         report.x[key] = '重複のため投稿されず';

@@ -43,6 +43,10 @@
     {
       "path": "/api/post-jake-ai-night",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/verify-predictions",
+      "schedule": "40 13 * * *"
     }
   ]
 }
