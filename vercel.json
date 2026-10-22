@@ -1,10 +1,6 @@
 {
   "crons": [
     {
-      "path": "/api/post-instagram",
-      "schedule": "0 21 * * *"
-    },
-    {
       "path": "/api/post-jake-images",
       "schedule": "10 21 * * *"
     },
