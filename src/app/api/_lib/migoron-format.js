@@ -21,6 +21,8 @@ export const SCORE_LABELS = {
   flower: '見頃期待度',
 };
 
+// 45〜69%の「どちらとも言えない」帯は、メモが「期待薄」などになりうるため、
+// 「狙い目」のように強く勧める言い方は避け、相対的な言い方にする。
 const GOOD = 70;
 const FAIR = 45;
 
@@ -33,7 +35,7 @@ export function buildHook(kind, ranked) {
 
   if (kind === 'star') {
     if (best >= GOOD) return `今夜は${name}で星がよく見えそう✨`;
-    if (best >= FAIR) return `今夜の星空は${name}が狙い目✨`;
+    if (best >= FAIR) return `今夜は${name}が一番見やすそう✨`;
     return '今夜の星空観測は厳しそう…';
   }
   if (kind === 'cloud') {
@@ -43,7 +45,7 @@ export function buildHook(kind, ranked) {
   }
   if (kind === 'fuji') {
     if (best >= GOOD) return `明日の朝、${name}で富士山がくっきり🗻`;
-    if (best >= FAIR) return `明日の朝の富士山は${name}が狙い目🗻`;
+    if (best >= FAIR) return `明日の朝は${name}が一番見やすそう🗻`;
     return '明日の朝の富士山は雲に隠れそう…';
   }
   if (kind === 'flower') {
