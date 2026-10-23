@@ -113,6 +113,8 @@ function memoContradictsScore(avgScore, memo) {
   const hasPositive = POSITIVE_PHRASES.some(p => memo.includes(p));
   if (avgScore >= 60 && hasNegative && !hasPositive) return true;
   if (avgScore < 35 && hasPositive && !hasNegative) return true;
+  // 「期待大」「絶好」のような強い言い方は、指数が中程度(60未満)なら誇大になる
+  if (avgScore < 60 && ['絶好', '期待大'].some(p => memo.includes(p))) return true;
   return false;
 }
 
@@ -154,7 +156,9 @@ async function buildMemo(apiKey, kind, title, ranked, avgScore, defaultTime) {
     if (raw) memo = raw.replace(/\n/g, '').replace(/^["'`]|["'`]$/g, '').trim();
   } catch { memo = null; }
 
-  if (!memo || memoContradictsScore(avgScore, memo)) {
+  // メモの上限(重み付き44)を超えると本文組み立て時に「…」で途中切れするため、
+  // 文の途中で切らずに定型文に差し替える
+  if (!memo || memoContradictsScore(avgScore, memo) || weightedLength(memo) > 44) {
     memo = buildFallbackMemo(avgScore, kind);
   }
   return memo;

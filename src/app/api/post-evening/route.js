@@ -113,6 +113,8 @@ function memoContradictsScore(bestScore, memo) {
   const hasPositive = POSITIVE_PHRASES.some(p => memo.includes(p));
   if (bestScore >= 60 && hasNegative && !hasPositive) return true;
   if (bestScore < 35 && hasPositive && !hasNegative) return true;
+  // 「期待大」「絶好」のような強い言い方は、指数が中程度(60未満)なら誇大になる
+  if (bestScore < 60 && ['絶好', '期待大'].some(p => memo.includes(p))) return true;
   return false;
 }
 

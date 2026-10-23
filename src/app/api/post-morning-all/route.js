@@ -157,7 +157,8 @@ async function buildMemo(apiKey, ranked, avgScore, weatherJA) {
     if (raw) memo = raw.replace(/\n/g, '').replace(/^["'`]|["'`]$/g, '').trim();
   } catch { memo = null; }
 
-  if (!memo || memoContradictsScore(avgScore, memo)) {
+  // メモの上限(重み付き44)を超えると途中で「…」切れするため、定型文に差し替える
+  if (!memo || memoContradictsScore(avgScore, memo) || weightedLength(memo) > 44) {
     memo = buildFallbackMemo(avgScore, weatherJA);
   }
   return memo;
