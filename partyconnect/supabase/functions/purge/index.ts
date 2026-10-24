@@ -20,6 +20,18 @@ async function cleanupPhotos(db: SupabaseClient, eventId: string): Promise<void>
   }
 }
 
+// 秘密値の比較は所要時間で一致位置が漏れないよう定数時間で行う
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const x = enc.encode(a);
+  const y = enc.encode(b);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+  }
+  return diff === 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return preflight();
   try {
@@ -28,7 +40,7 @@ Deno.serve(async (req) => {
     const provided = req.headers.get('x-cron-secret');
 
     // Cron からの一括消去
-    if (cronSecret && provided && provided === cronSecret) {
+    if (cronSecret && provided && timingSafeEqual(provided, cronSecret)) {
       const { data, error } = await db.rpc('purge_due_events');
       if (error) throw error;
       const purgedIds = (data as string[] | null) ?? [];
