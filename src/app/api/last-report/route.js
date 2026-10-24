@@ -11,7 +11,9 @@ const redis = new Redis({
 export async function GET(request) {
   const url = new URL(request.url);
   const authHeader = request.headers.get('authorization');
-  if (authHeader !== 'Bearer ' + process.env.CRON_SECRET && url.searchParams.get('key') !== 'mgr-debug-7519') {
+  // 認証はCRON_SECRETのみ（ヘッダーまたは?key=）。未設定なら常に拒否
+  const secret = process.env.CRON_SECRET;
+  if (!secret || (authHeader !== 'Bearer ' + secret && url.searchParams.get('key') !== secret)) {
     return new Response('Unauthorized', { status: 401 });
   }
   const raw = await redis.get('last_morning_report');

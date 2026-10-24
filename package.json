@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "latest",
+    "next": "16.4.3",
     "react": "latest",
     "react-dom": "latest",
     "twitter-api-v2": "^1.16.1",

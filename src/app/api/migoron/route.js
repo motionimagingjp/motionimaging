@@ -1,10 +1,50 @@
+import { Redis } from '@upstash/redis';
+
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+// 入力文字数の上限と、1日の利用回数の上限（IPごと・全体）
+const MAX_INPUT_LEN = 100;
+const PER_IP_DAILY = 30;
+const GLOBAL_DAILY = 500;
+
+const redis = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
+  ? new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN })
+  : null;
+
+const clip = (v) => (typeof v === 'string' ? v.slice(0, MAX_INPUT_LEN) : '');
+
+// 上限超過ならtrue。Redisが無い・失敗したときは制限しない（文字数上限は常にかかる）
+async function overDailyLimit(request) {
+  if (!redis) return false;
+  try {
+    const ip = (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown';
+    const day = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); // JST日付
+    const ipKey = `migoron_rl:${day}:${ip}`;
+    const globalKey = `migoron_rl:${day}:all`;
+    const [ipCount, globalCount] = await Promise.all([redis.incr(ipKey), redis.incr(globalKey)]);
+    if (ipCount === 1) await redis.expire(ipKey, 172800);
+    if (globalCount === 1) await redis.expire(globalKey, 172800);
+    return ipCount > PER_IP_DAILY || globalCount > GLOBAL_DAILY;
+  } catch (e) {
+    console.error('rate limit error:', e);
+    return false;
+  }
+}
 
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { whenLabel, dateLabel, regionLabel, flowerLabel, freetext, detailMode } = body;
+    const whenLabel = clip(body?.whenLabel);
+    const dateLabel = clip(body?.dateLabel);
+    const regionLabel = clip(body?.regionLabel);
+    const flowerLabel = clip(body?.flowerLabel);
+    const freetext = clip(body?.freetext);
+    const detailMode = !!body?.detailMode;
+
+    if (await overDailyLimit(request)) {
+      return Response.json({ error: '本日の利用上限に達しました。明日またお試しください' }, { status: 429 });
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
