@@ -21,6 +21,7 @@ export const JOBS = [
   { id: 'jake_ai_morning',         label: 'X jake 生成AI 朝',             schedule: '毎朝 7:30' },
   { id: 'jake_ai_night',           label: 'X jake 生成AI 夜',             schedule: '毎晩 22:00' },
   { id: 'jake_ai_diary',           label: 'X jake 30日振り返り',          schedule: '毎晩 22:00' },
+  { id: 'verify_predictions',      label: 'ミゴロン予報の答え合わせ',      schedule: '毎晩 22:40' },
 ];
 
 const statusKey = (job) => `job_status:${job}`;

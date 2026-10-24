@@ -4,6 +4,8 @@ import { isAdminAuthorized } from '../../lib/admin-auth';
 import { readAllJobStatus } from '../../lib/job-status';
 import { checkAllTokens } from '../../lib/token-check';
 import { getPartyconnectStats } from '../../lib/partyconnect-stats';
+import { KINDS, readPredictionRecords, summarizePredictions } from '../../lib/prediction-log';
+import { jstDateString } from '../api/_lib/migoron-scoring';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,12 +101,17 @@ export default async function AdminPage() {
   const h = await headers();
   if (!isAdminAuthorized(h.get('authorization'))) notFound();
 
-  const [jobs, tokens, party] = await Promise.all([
+  const [jobs, tokens, party, records] = await Promise.all([
     readAllJobStatus().catch((e) => ({ error: e.message })),
     checkAllTokens(),
     getPartyconnectStats().catch((e) => ({ configured: true, error: e.message })),
+    readPredictionRecords(28).catch((e) => ({ error: e.message })),
   ]);
   const now = Date.now();
+
+  const accuracy = Array.isArray(records)
+    ? [7, 28].map((days) => ({ days, ...summarizePredictions(records, jstDateString(-(days - 1))) }))
+    : null;
 
   const jobRows = Array.isArray(jobs) ? jobs.map((j) => ({ ...j, state: jobState(j.status, now) })) : [];
   const tokenRows = tokens.map((t) => ({ ...t, state: tokenState(t) }));
@@ -170,6 +177,50 @@ export default async function AdminPage() {
           <div style={{ ...sub, marginTop: '8px' }}>
             「記録なし」は、この画面を追加してからまだ一度も実行されていない投稿です。次回の実行後に表示されます。
           </div>
+        </Section>
+
+        <Section title="ミゴロン予報の答え合わせ">
+          {!accuracy ? (
+            <div style={card}>読み込みに失敗しました: {records.error}</div>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {accuracy.map((a) => (
+                  <div key={a.days} style={card}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'baseline' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>直近{a.days}日</div>
+                      <div style={sub}>答え合わせ待ち {a.pending}日分</div>
+                    </div>
+                    {a.overall.n === 0 ? (
+                      <div style={sub}>まだ集計できるデータがありません（投稿の翌日以降に反映されます）</div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '2px', fontVariantNumeric: 'tabular-nums' }}>
+                          的中率 {a.overall.hitRate}%
+                          <span style={{ ...sub, marginLeft: '8px' }}>
+                            Brier {a.overall.brier} ・ ズレ平均 {a.overall.mae}点 ・ {a.overall.n}件
+                          </span>
+                        </div>
+                        {KINDS.map((k) => {
+                          const s = a.byKind[k.id];
+                          return (
+                            <div key={k.id} style={sub}>
+                              {k.label}：{s.n === 0 ? 'データなし' : `的中率 ${s.hitRate}% ・ Brier ${s.brier} ・ ズレ ${s.mae}点（${s.n}件）`}
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ ...sub, marginTop: '8px' }}>
+                投稿した指数を翌日、Open-Meteoの過去値で同じ式に当てはめて判定しています（観測所の実測ではなく予報モデルの解析値）。
+                「指数60以上＝見られる」とみなし、予測と結果が一致すれば的中。Brierは0に近いほど良く、0.25以下なら当て推量より上です。
+                SNS用の文面は /api/verify-predictions?report=1 で取得できます。
+              </div>
+            </>
+          )}
         </Section>
 
         <Section title="SNSトークン">

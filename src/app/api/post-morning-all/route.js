@@ -42,7 +42,9 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
-import { getFlowerSpotsForDate, computeFlowerScores, currentSeasonJST, seasonalIndices } from '../_lib/migoron-scoring';
+import { savePredictions } from '../../../lib/prediction-log';
+import { getFlowerSpotsForDate, computeFlowerScores, currentSeasonJST, seasonalIndices, jstDateString } from '../_lib/migoron-scoring';
+import { buildHook, SCORE_LABELS } from '../_lib/migoron-format';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
@@ -155,7 +157,8 @@ async function buildMemo(apiKey, ranked, avgScore, weatherJA) {
     if (raw) memo = raw.replace(/\n/g, '').replace(/^["'`]|["'`]$/g, '').trim();
   } catch { memo = null; }
 
-  if (!memo || memoContradictsScore(avgScore, memo)) {
+  // メモの上限(重み付き44)を超えると途中で「…」切れするため、定型文に差し替える
+  if (!memo || memoContradictsScore(avgScore, memo) || weightedLength(memo) > 44) {
     memo = buildFallbackMemo(avgScore, weatherJA);
   }
   return memo;
@@ -166,7 +169,8 @@ async function buildMemo(apiKey, ranked, avgScore, weatherJA) {
 // ============================================================
 function buildFlowerTweetText(dateLabel, ranked, memo) {
   const build = (nameW, memoW, count) => {
-    let t = '花畑指数【' + dateLabel + '】\n';
+    let t = clipWeighted(buildHook('flower', ranked), 48) + '\n';
+    t += '花畑指数【' + dateLabel + '】' + SCORE_LABELS.flower + '\n';
     for (const s of ranked.slice(0, count)) {
       const emoji = s.emoji || '🌸';
       t += emoji + ' ' + clipWeighted(s.name, nameW) + '(' + s.score + '%)\n';
@@ -178,7 +182,7 @@ function buildFlowerTweetText(dateLabel, ranked, memo) {
 
   // 段階的に削りながら、最初に収まったものを採用
   const plans = [
-    [30, 44, 3], [26, 36, 3], [24, 28, 3],
+    [34, 44, 3], [30, 36, 3], [26, 36, 3], [24, 28, 3],
     [22, 20, 3], [22,  0, 3], [20,  0, 3],
     [18,  0, 2],
   ];
@@ -476,6 +480,10 @@ export async function GET(request) {
       const r = await tweetWithRetry(xClient, text, 3, mediaId);
       if (r.ok) {
         report.x[key] = 'ok (w:' + weightedLength(text) + (r.attempts > 1 ? `, ${r.attempts}回目で成功` : '') + ')';
+        // 答え合わせ(P4)用に予測を保存（Open-Meteoで算出できた回のみ。対象日は今日）
+        if (scoreSource === 'open-meteo') {
+          report.predictionLogged = await savePredictions('flower', jstDateString(0), scored);
+        }
         // 画像投稿が成功した場合のみローテーションを進める
         if (photoMeta && photoMeta.uploaded) {
           await redis.set(photoMeta.photoKey, photoMeta.index);
