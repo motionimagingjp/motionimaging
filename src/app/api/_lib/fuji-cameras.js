@@ -21,15 +21,17 @@ export const FUJI_CAMERAS = [
   {
     id: 'fujinomiya',
     label: '富士宮（静岡県 ライブカメラ富士山ビュー 午前8時）',
+    // 毎朝8時に撮影された640x480の写真（ページの<img>から確認、2026-11-21）
     page: 'https://www.pref.shizuoka.jp/fujisanview/fujinomiya/1045759.html',
-    imagePattern: null,
+    imagePattern: '/~live/fujinomiya/08/l\\.jpg$',
     spots: ['田貫湖'],
   },
   {
     id: 'fujiyoshida',
-    label: '富士吉田（山梨県 富士山ライブカメラ）',
+    label: '富士吉田（山梨県 富士山ライブカメラ／富士吉田市のカメラ）',
+    // 富士吉田市のネットワークカメラの現在画像（ページの<img>から確認、2026-11-21）
     page: 'https://www.pref.yamanashi.jp/livecamera/fujiyoshida/index.html',
-    imagePattern: null,
+    imagePattern: 'camera\\.city\\.fujiyoshida\\.yamanashi\\.jp/.*GetOneShot',
     spots: ['新道峠', '山中湖パノラマ台'],
   },
 ];

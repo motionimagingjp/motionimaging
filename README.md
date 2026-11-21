@@ -25,6 +25,7 @@ Motion Imaging の公式サイト（Next.js 16 / Vercel Hobby）と、SNS自動�
 | 18:05 | `/api/post-evening` | X ミゴロン ＋Threads | 星空指数（実際の天気から算出） | `post-images/star/` |
 | 21:15 | `/api/post-daily` | X ミゴロン ＋Threads | 翌日の雲海指数・富士山指数（2本） | `post-images/cloud/` `fuji/` |
 | 22:40 | `/api/verify-predictions` | （投稿なし） | ミゴロン予報の答え合わせ（下記） | なし |
+| 8:20 | `/api/check-fuji-camera` | （投稿なし） | 富士山が実際に見えたかをライブカメラで判定（下記） | なし |
 | 7:30 | `/api/post-sukuado-morning` | X スクアド ＋Threads | 朝枠 | なし |
 | 7:31 | `/api/post-sukuado-morning-question` | X スクアド ＋Threads | 朝の質問 | なし |
 | 22:00 | `/api/post-sukuado-night` | X スクアド ＋Threads | 夜枠 | `post-images/scad-night/` |
@@ -58,7 +59,7 @@ Motion Imaging の公式サイト（Next.js 16 / Vercel Hobby）と、SNS自動�
 | 項目 | 内容 | データ元 |
 |---|---|---|
 | 自動投稿の稼働状況 | 上表13本それぞれの「正常／一部注意／失敗／止まっている可能性（26時間以上実行なし）」、エラー内容、最後に成功した日時 | 各cronがRedisの `job_status:<id>` に記録（`src/lib/job-status.js`） |
-| ミゴロン予報のレビュー・答え合わせ | 直近14日の判定（合格／様子見／要見直し）、信頼度の表、外れた予測、実地確認の入力。直近7日・28日の的中率、Brierスコア、予測とのズレ（点） | Redisの `pred:<種別>:<日付>`（`src/lib/prediction-log.js`） |
+| ミゴロン予報のレビュー・答え合わせ | 直近14日の判定（合格／様子見／要見直し）、信頼度の表、外れた予測、富士山のライブカメラ判定。直近7日・28日の的中率、Brierスコア、予測とのズレ（点） | Redisの `pred:<種別>:<日付>`（`src/lib/prediction-log.js`） |
 | SNSトークン | Instagram 2つ・Threads 3つが今使えるか（開くたびに確認） | Meta API の `/me` |
 | パーティコネクト | 主催者・開催予定・開催済み・延べ参加者・成立ペア | Supabase（参加者の個人情報は取得しない） |
 
@@ -80,7 +81,8 @@ Motion Imaging の公式サイト（Next.js 16 / Vercel Hobby）と、SNS自動�
   - 週次の的中率はこのAPIの `?report=1`（`&days=7|28`）で取得できる。JSONの `snsText` はSNS発信用の下書き（自動投稿はしていない）。
   - `?dry=1` は検証結果を表示するだけで保存しない。
 - **定期レビュー**: 2週間ごとを目安に `/admin` の「ミゴロン予報のレビュー」を見る。直近14日と前の14日を合格ライン（`prediction-log.js` の `TARGETS`）と照らして「合格／様子見／要見直し」を出し、信頼度の表（出した指数の帯ごとに結果が良かった割合）と外れた予測の一覧を並べている。JSONは `?review=1`。判定の基準・目標値・式を直すときの手順は [`docs/migoron_accuracy_review.md`](docs/migoron_accuracy_review.md)。
-- **実地確認**: 上の的中率は予報モデルの解析値との比較で、実際に見えたかではない。`/admin` の「実地確認」で直近3日分の「見えた／見えなかった」を入力すると（`/admin/observe`）、予測との一致率を別枠で集計する。入力は任意。
+- **ライブカメラ判定（富士山）**: 上の的中率は予報モデルの解析値との比較で、実際に見えたかではない。`/api/check-fuji-camera`（毎朝8:20 JST）が自治体の公開ライブカメラ画像（静岡県「ライブカメラ富士山ビュー」富士宮の午前8時の写真→田貫湖、富士吉田市のカメラの現在画像→新道峠・山中湖パノラマ台）をGeminiで判定し、「実際に見えたか」として予測ログに記録する。画像は保存・再配布しない。カメラの設定は `src/app/api/_lib/fuji-cameras.js`、ページ内の画像一覧は `?debug=1` で確認できる。
+- **GitHubへの記録**: GitHub Actions（`.github/workflows/migoron-monitoring.yml`、毎日9:00 JST）が `?export=1` の結果を **`migoron-monitoring` ブランチ**の `predictions.csv` に追記し、毎月1日・15日はレビューを `reviews/YYYY-MM-DD.md` と `latest-review.md` に書く。mainには書かない（Vercelはこのブランチをデプロイしない設定）。リポジトリのActions secretに `CRON_SECRET`（Vercelと同じ値）が必要。
 
 ---
 
