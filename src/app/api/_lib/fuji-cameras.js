@@ -27,20 +27,13 @@ export const FUJI_CAMERAS = [
     spots: ['田貫湖'],
   },
   {
-    id: 'fujiyoshida',
-    label: '富士吉田（山梨県 富士山ライブカメラ／富士吉田市のカメラ）',
-    // 富士吉田市のネットワークカメラの現在画像（ページの<img>から確認、2026-11-21）
-    page: 'https://www.pref.yamanashi.jp/livecamera/fujiyoshida/index.html',
-    imagePattern: 'camera\\.city\\.fujiyoshida\\.yamanashi\\.jp/.*GetOneShot',
-    spots: ['新道峠', '山中湖パノラマ台'],
-  },
-  {
-    // 北側の候補（調査中）: 山梨県公式観光サイト「今見える富士山ライブカメラ」
-    id: 'yamanashi-kankou',
-    label: '山梨県 今見える富士山ライブカメラ',
+    // 富士吉田市のカメラ（山梨県「富士山ライブカメラ」掲載）は海外のサーバー（Vercel）から
+    // 接続できなかった（EBUSY、2026-11-21）ため、同じ北側の精進湖のカメラを使う。
+    id: 'shojiko',
+    label: '精進湖（山梨県 今見える富士山ライブカメラ）',
     page: 'https://www.yamanashi-kankou.jp/heritage/fujisanwatcher/jp/live/index.html',
-    imagePattern: null,
-    spots: [],
+    imagePattern: 'lcnet\\.jp/~live-cam/shoji/shoji-capt\\.jpg$',
+    spots: ['新道峠', '山中湖パノラマ台'],
   },
 ];
 
