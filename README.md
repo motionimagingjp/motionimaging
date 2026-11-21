@@ -81,7 +81,7 @@ Motion Imaging の公式サイト（Next.js 16 / Vercel Hobby）と、SNS自動�
   - 週次の的中率はこのAPIの `?report=1`（`&days=7|28`）で取得できる。JSONの `snsText` はSNS発信用の下書き（自動投稿はしていない）。
   - `?dry=1` は検証結果を表示するだけで保存しない。
 - **定期レビュー**: 2週間ごとを目安に `/admin` の「ミゴロン予報のレビュー」を見る。直近14日と前の14日を合格ライン（`prediction-log.js` の `TARGETS`）と照らして「合格／様子見／要見直し」を出し、信頼度の表（出した指数の帯ごとに結果が良かった割合）と外れた予測の一覧を並べている。JSONは `?review=1`。判定の基準・目標値・式を直すときの手順は [`docs/migoron_accuracy_review.md`](docs/migoron_accuracy_review.md)。
-- **ライブカメラ判定（富士山）**: 上の的中率は予報モデルの解析値との比較で、実際に見えたかではない。`/api/check-fuji-camera`（毎朝8:20 JST）が自治体の公開ライブカメラ画像（静岡県「ライブカメラ富士山ビュー」富士宮の午前8時の写真→田貫湖、富士吉田市のカメラの現在画像→新道峠・山中湖パノラマ台）をGeminiで判定し、「実際に見えたか」として予測ログに記録する。画像は保存・再配布しない。カメラの設定は `src/app/api/_lib/fuji-cameras.js`、ページ内の画像一覧は `?debug=1` で確認できる。
+- **ライブカメラ判定（富士山）**: 上の的中率は予報モデルの解析値との比較で、実際に見えたかではない。`/api/check-fuji-camera`（毎朝8:20 JST）が自治体の公開ライブカメラ画像（静岡県「ライブカメラ富士山ビュー」富士宮の午前8時の写真→田貫湖、山梨県観光サイト掲載の精進湖のカメラの現在画像→新道峠・山中湖パノラマ台）をGeminiで判定し、「実際に見えたか」として予測ログに記録する。画像は保存・再配布しない。カメラの設定は `src/app/api/_lib/fuji-cameras.js`、ページ内の画像一覧は `?debug=1` で確認できる。
 - **GitHubへの記録**: GitHub Actions（`.github/workflows/migoron-monitoring.yml`、毎日9:00 JST）が `?export=1` の結果を **`migoron-monitoring` ブランチ**の `predictions.csv` に追記し、毎月1日・15日はレビューを `reviews/YYYY-MM-DD.md` と `latest-review.md` に書く。mainには書かない（Vercelはこのブランチをデプロイしない設定）。リポジトリのActions secretに `CRON_SECRET`（Vercelと同じ値）が必要。
 
 ---
