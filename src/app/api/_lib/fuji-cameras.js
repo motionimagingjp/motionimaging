@@ -34,6 +34,14 @@ export const FUJI_CAMERAS = [
     imagePattern: 'camera\\.city\\.fujiyoshida\\.yamanashi\\.jp/.*GetOneShot',
     spots: ['新道峠', '山中湖パノラマ台'],
   },
+  {
+    // 北側の候補（調査中）: 山梨県公式観光サイト「今見える富士山ライブカメラ」
+    id: 'yamanashi-kankou',
+    label: '山梨県 今見える富士山ライブカメラ',
+    page: 'https://www.yamanashi-kankou.jp/heritage/fujisanwatcher/jp/live/index.html',
+    imagePattern: null,
+    spots: [],
+  },
 ];
 
 const UA = 'Mozilla/5.0 (compatible; MigoronAccuracyCheck/1.0; +https://motionimaging.vercel.app/migoron)';
@@ -54,6 +62,10 @@ async function fetchWithTimeout(url, ms, opts = {}) {
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
     return await fetch(url, { ...opts, signal: ctrl.signal, headers: { 'User-Agent': UA, ...(opts.headers || {}) } });
+  } catch (e) {
+    // "fetch failed" だけでは原因が分からないため、接続エラーのコードを添える
+    const cause = e.cause && (e.cause.code || e.cause.message);
+    throw new Error(`${new URL(url).host} に接続できない: ${e.name === 'AbortError' ? `タイムアウト(${ms}ms)` : e.message}${cause ? ` (${cause})` : ''}`);
   } finally {
     clearTimeout(t);
   }
