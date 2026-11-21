@@ -5,7 +5,7 @@ import { readAllJobStatus } from '../../lib/job-status';
 import { checkAllTokens } from '../../lib/token-check';
 import { getPartyconnectStats } from '../../lib/partyconnect-stats';
 import {
-  KINDS, FIELD_KINDS, REVIEW_DAYS, VERDICT_LABEL, FIELD_TARGET,
+  KINDS, REVIEW_DAYS, VERDICT_LABEL, FIELD_TARGET,
   readPredictionRecords, summarizePredictions, buildReview, calibrationTable, listMisses,
 } from '../../lib/prediction-log';
 import { jstDateString } from '../api/_lib/migoron-scoring';
@@ -36,18 +36,6 @@ const INPUT_LABEL = {
   cloudAvg: '雲量(%)', precipProbMax: '降水確率(%)', bestWindow: '時間帯',
   maxTemp: '最高気温(℃)', pastRainSums: '直近の雨(mm)', windMax: '最大風速(m/s)',
 };
-const FIELD_WHEN = { fuji: '（朝）', cloud: '（朝）', star: '（夜）' };
-const FIELD_WORDS = { fuji: ['見えた', '見えなかった'], cloud: ['出た', '出なかった'], star: ['見えた', '見えなかった'] };
-
-function fieldButton(active, tone) {
-  const t = TONE[tone];
-  return {
-    padding: '5px 10px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer',
-    border: `1px solid ${active ? t.color : '#d6d6d2'}`,
-    background: active ? t.bg : '#ffffff', color: active ? t.color : '#1a1a1a',
-    fontWeight: active ? 'bold' : 'normal',
-  };
-}
 
 const PLAN_LABEL = { free: '無料', spot: 'スポット', light: 'ライト', pro: 'プロ' };
 const MODE_LABEL = { matching: 'マッチング', checkin_only: '受付のみ' };
@@ -138,15 +126,15 @@ export default async function AdminPage() {
     ? [7, 28].map((days) => ({ days, ...summarizePredictions(records, jstDateString(-(days - 1))) }))
     : null;
 
-  // 定期レビュー（直近14日 vs 前の14日）・信頼度の表・外れた予測・実地確認の入力対象
+  // 定期レビュー（直近14日 vs 前の14日）・信頼度の表・外れた予測・ライブカメラ判定
   const review = accuracy ? buildReview(records) : null;
   const calibration = accuracy
     ? review.kinds.map((k) => ({ ...k, rows: calibrationTable(records, jstDateString(-REVIEW_DAYS * 2), k.id) }))
     : [];
   const misses = accuracy ? listMisses(records, jstDateString(-REVIEW_DAYS), 12) : [];
-  const fieldTargets = accuracy
+  const cameraRecs = accuracy
     ? records
-        .filter((r) => FIELD_KINDS.includes(r.kind) && r.targetDate >= jstDateString(-2) && r.targetDate <= jstDateString(0))
+        .filter((r) => r.kind === 'fuji' && r.actual && r.targetDate >= jstDateString(-6))
         .sort((a, b) => (a.targetDate < b.targetDate ? 1 : a.targetDate > b.targetDate ? -1 : 0))
     : [];
 
@@ -249,7 +237,7 @@ export default async function AdminPage() {
                           </div>
                           {c.fieldN > 0 && (
                             <div style={sub}>
-                              実地確認との一致：{c.fieldHitRate}%（{c.fieldN}件、合格ライン {FIELD_TARGET.hitRate}%）
+                              ライブカメラ判定との一致：{c.fieldHitRate}%（{c.fieldN}件、合格ライン {FIELD_TARGET.hitRate}%）
                             </div>
                           )}
                         </>
@@ -320,43 +308,32 @@ export default async function AdminPage() {
                 </div>
               )}
 
-              <h3 id="field" style={{ fontSize: '14px', margin: '18px 0 8px' }}>実地確認（実際に見えたか）</h3>
-              {fieldTargets.length === 0 ? (
-                <div style={{ ...card, ...sub }}>入力できる予測はありません</div>
+              <h3 style={{ fontSize: '14px', margin: '18px 0 8px' }}>富士山：ライブカメラ判定（直近7日）</h3>
+              {cameraRecs.length === 0 ? (
+                <div style={{ ...card, ...sub }}>まだ判定はありません（毎朝8:20に自動判定）</div>
               ) : (
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  {fieldTargets.map((rec) => (
-                    <div key={`${rec.kind}:${rec.targetDate}`} style={card}>
-                      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                        {fmtDate(rec.targetDate)} {KIND_LABEL[rec.kind]}{FIELD_WHEN[rec.kind]}
+                <div style={{ ...card, padding: '4px 14px' }}>
+                  {cameraRecs.flatMap((rec) => rec.items.map((it, i) => {
+                    const a = rec.actual[i];
+                    if (!a) return null;
+                    const hit = (it.score >= 60) === a.seen;
+                    return (
+                      <div key={`${rec.targetDate}:${i}`} style={{ padding: '8px 0', borderTop: '1px solid #efefec' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
+                          <div style={{ fontSize: '13px', minWidth: 0 }}>
+                            {fmtDate(rec.targetDate)} {it.name}：予測 {it.score}% → {a.seen ? '見えた' : '見えなかった'}
+                          </div>
+                          <Badge tone={hit ? 'green' : 'red'}>{hit ? '的中' : '外れ'}</Badge>
+                        </div>
+                        <div style={{ ...sub, wordBreak: 'break-word' }}>{[a.camera, a.reason].filter(Boolean).join(' ・ ')}</div>
                       </div>
-                      {rec.items.map((it, i) => {
-                        const a = rec.actual && rec.actual[i];
-                        const w = FIELD_WORDS[rec.kind];
-                        return (
-                          <form key={i} method="post" action="/admin/observe" style={{
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px',
-                            flexWrap: 'wrap', padding: '6px 0', borderTop: '1px solid #efefec', marginTop: '6px',
-                          }}>
-                            <input type="hidden" name="kind" value={rec.kind} />
-                            <input type="hidden" name="date" value={rec.targetDate} />
-                            <input type="hidden" name="index" value={i} />
-                            <div style={{ fontSize: '13px', minWidth: 0 }}>{it.name} <span style={{ color: '#6b7280' }}>{it.score}%</span></div>
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              <button type="submit" name="seen" value="1" style={fieldButton(a && a.seen === true, 'green')}>{w[0]}</button>
-                              <button type="submit" name="seen" value="0" style={fieldButton(a && a.seen === false, 'red')}>{w[1]}</button>
-                              {a && <button type="submit" name="seen" value="clear" style={fieldButton(false, 'gray')}>取消</button>}
-                            </div>
-                          </form>
-                        );
-                      })}
-                    </div>
-                  ))}
+                    );
+                  }))}
                 </div>
               )}
               <div style={{ ...sub, marginTop: '8px' }}>
                 上の的中率は予報モデルの解析値との比較で、実際に見えたかどうかではありません。
-                現地やライブカメラで確認できた分だけ入力すると、予測との一致率を別枠で集計します（分かるスポットだけで構いません。直近3日分を入力できます）。
+                富士山は毎朝、自治体の公開ライブカメラの画像をAI（Gemini）で判定し、「実際に見えたか」として別枠で集計しています（指数60以上を「見える」予測とみなして比較）。
               </div>
             </>
           )}

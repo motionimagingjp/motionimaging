@@ -39,6 +39,15 @@
     {
       "path": "/api/verify-predictions",
       "schedule": "40 13 * * *"
+    },
+    {
+      "path": "/api/check-fuji-camera",
+      "schedule": "20 23 * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "migoron-monitoring": false
+    }
+  }
 }

@@ -7,12 +7,13 @@
 //   ?dry=1            : 検証結果を表示するだけで保存しない
 //   ?report=1         : 検証は行わず、直近の的中率・Brierスコアを返す
 //   ?days=7|14|28     : report=1の集計期間（既定7日）
+//   ?export=1&days=N  : GitHub記録用（monitoring/predictions.csv）に、スポット単位の行を返す（N≦60）
 //   ?review=1         : 定期レビュー用。直近14日と前の14日を合格ラインと照らした判定、
 //                       信頼度の表、外れた予測の一覧を返す（docs/migoron_accuracy_review.md）
 import { recordJobStatus } from '../../../lib/job-status';
 import {
   KINDS, REVIEW_DAYS, verifyPendingPredictions, readPredictionRecords, summarizePredictions, buildReportText,
-  buildReview, calibrationTable, listMisses,
+  buildReview, calibrationTable, listMisses, exportRows,
 } from '../../../lib/prediction-log';
 import { jstDateString } from '../_lib/migoron-scoring';
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,16 @@ export async function GET(request) {
     authHeader === 'Bearer ' + process.env.CRON_SECRET ||
     (keyParam && keyParam === process.env.CRON_SECRET);
   if (!authorized) return new Response('Unauthorized', { status: 401 });
+
+  if (url.searchParams.get('export') === '1') {
+    const days = Math.min(60, Math.max(1, Number(url.searchParams.get('days')) || 10));
+    try {
+      const records = await readPredictionRecords(days);
+      return new Response(JSON.stringify({ days, rows: exportRows(records) }), { status: 200, headers: jsonHeaders });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'エクスポート失敗: ' + e.message }), { status: 500, headers: jsonHeaders });
+    }
+  }
 
   if (url.searchParams.get('review') === '1') {
     try {

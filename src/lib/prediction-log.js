@@ -169,7 +169,7 @@ function finish(agg) {
 // records: readPredictionRecords の結果。対象日が sinceDate〜untilDate(YYYY-MM-DD、両端含む)の
 // 予測だけ集計する。untilDate省略時は上限なし。
 // 戻り値: { overall, byKind: { star: {...}, ... }, pending }（pending=答え合わせ待ちの予測日数）
-// fieldN/fieldHitRate は管理画面から手入力した「実際に見えたか」(rec.actual)との一致率。
+// fieldN/fieldHitRate はライブカメラで判定した「実際に見えたか」(rec.actual)との一致率。
 export function summarizePredictions(records, sinceDate, untilDate = null) {
   const overall = emptyAgg();
   const byKind = Object.fromEntries(KINDS.map((k) => [k.id, emptyAgg()]));
@@ -276,7 +276,7 @@ export const TARGETS = {
   cloud: { hitRate: 85, brier: 0.15, bias: 8 },
   fuji:  { hitRate: 85, brier: 0.15, bias: 8 },
 };
-export const FIELD_TARGET = { hitRate: 75, minN: 5 }; // 手入力の「実際に見えたか」との一致率
+export const FIELD_TARGET = { hitRate: 75, minN: 5 }; // ライブカメラ判定（実際に見えたか）との一致率
 
 function reviewKind(cur, prev, target) {
   if (cur.n < REVIEW_MIN_N) {
@@ -297,7 +297,7 @@ function reviewKind(cur, prev, target) {
     reasons.push(`前の14日より ${Math.round((prev.hitRate - cur.hitRate) * 10) / 10}ポイント悪化`);
   }
   if (cur.fieldN >= FIELD_TARGET.minN && cur.fieldHitRate < FIELD_TARGET.hitRate) {
-    reasons.push(`実地確認との一致 ${cur.fieldHitRate}%（${cur.fieldN}件）が合格ライン ${FIELD_TARGET.hitRate}% に届かない`);
+    reasons.push(`ライブカメラ判定との一致 ${cur.fieldHitRate}%（${cur.fieldN}件）が合格ライン ${FIELD_TARGET.hitRate}% に届かない`);
     serious = true;
   }
   const verdict = reasons.length === 0 ? 'ok' : (serious || reasons.length >= 2) ? 'action' : 'watch';
@@ -339,23 +339,52 @@ export function buildReview(records) {
 }
 
 // ============================================================
-// 実地確認（管理画面からの手入力）
+// 実際に見えたか（ライブカメラ判定）
 //
-// 答え合わせの「実測」は予報モデルの解析値で、実際に見えたかどうかではない。
-// 管理画面で「見えた／見えなかった」を入力すると rec.actual[スポットの番号] に
-// 残り、予測との一致率(fieldHitRate)として別枠で集計する。
+// 答え合わせの「結果」は予報モデルの解析値で、実際に見えたかどうかではない。
+// 富士山は毎朝ライブカメラ画像をGeminiで判定し（/api/check-fuji-camera）、
+// rec.actual[スポットの番号] に残す。予測との一致率は fieldHitRate として別枠で集計する。
 // ============================================================
-export const FIELD_KINDS = ['fuji', 'cloud', 'star'];
 
-// seen: true=見えた / false=見えなかった / null=入力を取り消す
-export async function saveFieldObservation(kind, date, index, seen, r = redis) {
+// seen: true=見えた / false=見えなかった。detail: { source, camera, visibility, reason }
+export async function saveActualObservation(kind, date, index, seen, detail = {}, r = redis) {
   const rec = parse(await r.get(key(kind, date)));
   if (!rec || !rec.items[index]) return false;
   const actual = { ...(rec.actual || {}) };
-  if (seen === null) delete actual[index];
-  else actual[index] = { seen: !!seen, at: new Date().toISOString() };
+  actual[index] = { seen: !!seen, at: new Date().toISOString(), ...detail };
   await r.set(key(kind, date), { ...rec, actual }, { ex: TTL_SECONDS });
   return true;
+}
+
+export async function readPredictionRecord(kind, date, r = redis) {
+  return parse(await r.get(key(kind, date)));
+}
+
+// GitHubの記録用（monitoring/predictions.csv）に、スポット単位の行へ平らにする
+export function exportRows(records) {
+  const rows = [];
+  for (const rec of records) {
+    rec.items.forEach((it, i) => {
+      const v = rec.verified && rec.verified.items[i];
+      const a = rec.actual && rec.actual[i];
+      rows.push({
+        target_date: rec.targetDate,
+        kind: rec.kind,
+        spot: it.name,
+        predicted: it.score,
+        model_score: v && !v.error ? v.observedScore : '',
+        model_hit: v && !v.error ? (v.hit ? 1 : 0) : '',
+        brier: v && !v.error ? v.brier : '',
+        camera_seen: a ? (a.seen ? 1 : 0) : '',
+        camera_hit: a ? ((it.score >= GOOD_THRESHOLD) === a.seen ? 1 : 0) : '',
+        camera_note: a ? [a.camera, a.visibility, a.reason].filter(Boolean).join(' / ') : '',
+        verified_at: rec.verified ? rec.verified.at : '',
+        inputs: it.inputs ? JSON.stringify(it.inputs) : '',
+      });
+    });
+  }
+  rows.sort((x, y) => (x.target_date + x.kind + x.spot).localeCompare(y.target_date + y.kind + y.spot));
+  return rows;
 }
 
 // SNS発信用の文面（投稿はしない。管理画面とreport=1のJSONに載せるだけ）
