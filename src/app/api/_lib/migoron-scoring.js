@@ -105,6 +105,16 @@ function pick(arr, idx) { return idx.map(i => Number(arr[i])).filter(n => Number
 // ============================================================
 // 雲海指数・富士山指数の対象スポット（post-dailyが使用、spots.jsonから生成）
 // ============================================================
+// 雲海は全国の名所から候補を持ち、毎日その中で点数の高い上位を投稿する
+// （以前のGemini生成時代は日によって違う場所が出ていた。P2でスポットを
+// マスタ化した際に3か所固定になっていたのを、2026-11-24に候補を増やして戻した）。
+export const CLOUD_DISPLAY_COUNT = 3;
+
+// 点数の高い順。95%（上限）で並んだときは上限で切る前の点数で決める。
+export function rankCloudSpots(scores) {
+  return scores.slice().sort((a, b) => (b.score - a.score) || ((b.rawScore ?? 0) - (a.rawScore ?? 0)));
+}
+
 export const CLOUD_SPOTS = spotsData.spots
   .filter(s => s.type === 'unkai')
   .map(s => ({ name: displayName(s), emoji: '☁️', lat: s.lat, lon: s.lon }));
@@ -118,14 +128,20 @@ export const FUJI_SPOTS = spotsData.spots
 // 係数は連続値にしている。段階的な閾値（5刻みの固定加点）にすると、
 // 実測データでも結果が5の倍数ばかりに揃ってしまい、以前Geminiの出力が
 // 「5刻みで機械的」と指摘された見た目をコード計算でも再現してしまうため。
-export function scoreCloudSea({ dawnWeatherCode, dawnWindAvg, dawnHumidityAvg, diurnalRange }) {
+export function scoreCloudSea(args) {
+  return clampScore(cloudSeaRaw(args));
+}
+
+// 上限95・下限10で切る前の点数。好条件の日は複数スポットが95%に並ぶため、
+// 投稿する上位3件を選ぶときの順位付け（同点の解消）に使う。
+export function cloudSeaRaw({ dawnWeatherCode, dawnWindAvg, dawnHumidityAvg, diurnalRange }) {
   let score = 60;
   score += Math.max(0, 20 - dawnWindAvg * 2.5);      // 無風に近いほど加点、7〜8m/sでほぼ0
   score += (dawnHumidityAvg - 65) * 0.5;              // 早朝湿度が高いほど加点
   score += (diurnalRange - 5) * 1.8;                  // 前日との寒暖差が大きいほど加点
   if (dawnWeatherCode >= 45) score -= 40;             // 霧・雨など、視界自体が悪い
   else if (dawnWeatherCode >= 2) score -= 5;          // 曇り
-  return clampScore(score);
+  return score;
 }
 
 // 富士山指数: 早朝の雲量（低層・中層を重視）と視程、逆さ富士が狙える
@@ -177,13 +193,17 @@ async function fetchDawnMetrics(spots, dateStr, { pastDays = 1, forecastDays = 2
   return list.map(entry => extractDawnMetrics(entry, dateStr));
 }
 
-function cloudScoreFromMetrics(e) {
-  return scoreCloudSea({
+function cloudMetricsArgs(e) {
+  return {
     dawnWeatherCode: e.weatherCode,
     dawnWindAvg: e.windAvg,
     dawnHumidityAvg: e.humidityAvg,
     diurnalRange: e.yesterdayMaxTemp - e.tempMin,
-  });
+  };
+}
+
+function cloudScoreFromMetrics(e) {
+  return scoreCloudSea(cloudMetricsArgs(e));
 }
 
 function fujiScoreFromMetrics(e, reflection) {
@@ -221,7 +241,8 @@ export async function computeCloudAndFujiScores() {
   const cloudScores = CLOUD_SPOTS.map((spot, i) => {
     const e = cloudExtremes[i];
     if (!e || e.yesterdayMaxTemp === null) return { ...spot, score: 10, ok: false };
-    return { ...spot, score: cloudScoreFromMetrics(e), ok: true, inputs: cloudInputs(e) };
+    const rawScore = Math.round(cloudSeaRaw(cloudMetricsArgs(e)) * 10) / 10;
+    return { ...spot, score: cloudScoreFromMetrics(e), rawScore, ok: true, inputs: cloudInputs(e) };
   });
 
   const fujiScores = FUJI_SPOTS.map((spot, i) => {

@@ -1,0 +1,56 @@
+# ミゴロン予報の精度を毎日GitHubに記録する（docs/migoron_accuracy_review.md）。
+# 記録は migoron-monitoring ブランチの predictions.csv と reviews/ に残る（mainには書かない）。
+# 必要なもの: リポジトリのActions secret「CRON_SECRET」（Vercelと同じ値）。
+name: ミゴロン予報の記録
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 毎日 9:00 JST（答え合わせ22:40・カメラ判定8:20のあと）
+  workflow_dispatch:
+    inputs:
+      review:
+        description: '日付に関係なくレビューを書く'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: migoron-monitoring
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          ref: migoron-monitoring
+          path: monitoring-data
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 記録を更新
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          OUT_DIR: monitoring-data
+          REVIEW: ${{ inputs.review }}
+        run: node scripts/migoron-monitoring.mjs
+
+      - name: コミット
+        working-directory: monitoring-data
+        run: |
+          git config user.name "migoron-monitoring[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "記録更新 $(TZ=Asia/Tokyo date +%F)"
+            git push origin HEAD:migoron-monitoring
+          fi

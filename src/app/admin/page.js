@@ -4,7 +4,10 @@ import { isAdminAuthorized } from '../../lib/admin-auth';
 import { readAllJobStatus } from '../../lib/job-status';
 import { checkAllTokens } from '../../lib/token-check';
 import { getPartyconnectStats } from '../../lib/partyconnect-stats';
-import { KINDS, readPredictionRecords, summarizePredictions } from '../../lib/prediction-log';
+import {
+  KINDS, REVIEW_DAYS, VERDICT_LABEL, FIELD_TARGET,
+  readPredictionRecords, summarizePredictions, buildReview, calibrationTable, listMisses,
+} from '../../lib/prediction-log';
 import { jstDateString } from '../api/_lib/migoron-scoring';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +25,16 @@ const TONE = {
   yellow: { color: '#7a4f00', bg: '#fff2d6' },
   red:    { color: '#a3261b', bg: '#fde8e6' },
   gray:   { color: '#5f6368', bg: '#efefec' },
+};
+
+const VERDICT_TONE = { ok: 'green', watch: 'yellow', action: 'red', insufficient: 'gray' };
+const KIND_LABEL = Object.fromEntries(KINDS.map((k) => [k.id, k.label]));
+// 予測ログに残している「元の天気要素」の表示名
+const INPUT_LABEL = {
+  weatherCode: '天気コード', windAvg: '風速(m/s)', humidityAvg: '湿度(%)', diurnalRange: '前日との寒暖差(℃)',
+  cloudLow: '低層雲(%)', cloudMid: '中層雲(%)', cloudHigh: '高層雲(%)', visibilityKm: '視程(km)',
+  cloudAvg: '雲量(%)', precipProbMax: '降水確率(%)', bestWindow: '時間帯',
+  maxTemp: '最高気温(℃)', pastRainSums: '直近の雨(mm)', windMax: '最大風速(m/s)',
 };
 
 const PLAN_LABEL = { free: '無料', spot: 'スポット', light: 'ライト', pro: 'プロ' };
@@ -105,13 +118,25 @@ export default async function AdminPage() {
     readAllJobStatus().catch((e) => ({ error: e.message })),
     checkAllTokens(),
     getPartyconnectStats().catch((e) => ({ configured: true, error: e.message })),
-    readPredictionRecords(28).catch((e) => ({ error: e.message })),
+    readPredictionRecords(REVIEW_DAYS * 2 + 1).catch((e) => ({ error: e.message })),
   ]);
   const now = Date.now();
 
   const accuracy = Array.isArray(records)
     ? [7, 28].map((days) => ({ days, ...summarizePredictions(records, jstDateString(-(days - 1))) }))
     : null;
+
+  // 定期レビュー（直近14日 vs 前の14日）・信頼度の表・外れた予測・ライブカメラ判定
+  const review = accuracy ? buildReview(records) : null;
+  const calibration = accuracy
+    ? review.kinds.map((k) => ({ ...k, rows: calibrationTable(records, jstDateString(-REVIEW_DAYS * 2), k.id) }))
+    : [];
+  const misses = accuracy ? listMisses(records, jstDateString(-REVIEW_DAYS), 12) : [];
+  const cameraRecs = accuracy
+    ? records
+        .filter((r) => r.kind === 'fuji' && r.actual && r.targetDate >= jstDateString(-6))
+        .sort((a, b) => (a.targetDate < b.targetDate ? 1 : a.targetDate > b.targetDate ? -1 : 0))
+    : [];
 
   const jobRows = Array.isArray(jobs) ? jobs.map((j) => ({ ...j, state: jobState(j.status, now) })) : [];
   const tokenRows = tokens.map((t) => ({ ...t, state: tokenState(t) }));
@@ -179,7 +204,142 @@ export default async function AdminPage() {
           </div>
         </Section>
 
-        <Section title="ミゴロン予報の答え合わせ">
+        <Section title={`ミゴロン予報のレビュー（直近${REVIEW_DAYS}日）`}>
+          {!review ? (
+            <div style={card}>読み込みに失敗しました: {records.error}</div>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {review.kinds.map((k) => {
+                  const c = k.current;
+                  const p = k.previous;
+                  return (
+                    <div key={k.id} style={card}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
+                        <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{k.label}</div>
+                        <Badge tone={VERDICT_TONE[k.verdict]}>{VERDICT_LABEL[k.verdict]}</Badge>
+                      </div>
+                      {c.n === 0 ? (
+                        <div style={sub}>データなし</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: '20px', fontWeight: 'bold', marginTop: '2px', fontVariantNumeric: 'tabular-nums' }}>
+                            的中率 {c.hitRate}%
+                            <span style={{ ...sub, marginLeft: '8px' }}>
+                              前の{REVIEW_DAYS}日 {p.n ? `${p.hitRate}%` : '—'} ・ 合格ライン {k.target.hitRate}%
+                            </span>
+                          </div>
+                          <div style={sub}>
+                            Brier {c.brier}（{k.target.brier}以下で合格） ・ 偏り {c.bias > 0 ? '+' : ''}{c.bias}点（±{k.target.bias}以内で合格） ・ {c.n}件
+                          </div>
+                          <div style={sub}>
+                            外れの内訳：高く出し過ぎ {c.falseAlarms}件 ／ 低く出し過ぎ {c.misses}件
+                          </div>
+                          {c.fieldN > 0 && (
+                            <div style={sub}>
+                              ライブカメラ判定との一致：{c.fieldHitRate}%（{c.fieldN}件、合格ライン {FIELD_TARGET.hitRate}%）
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {k.reasons.map((r, i) => (
+                        <div key={i} style={{ ...sub, color: TONE[VERDICT_TONE[k.verdict]].color }}>{r}</div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ ...sub, marginTop: '8px' }}>
+                対象は {fmtDate(review.period.since)}〜{fmtDate(review.period.until)}。
+                「偏り」は予測−結果の平均で、+なら高く出し過ぎです。花畑は当日の予報どうしを比べる形になり差が出ないため、判定から外しています。
+                判定の基準と見直しの手順は docs/migoron_accuracy_review.md、同じ内容のJSONは /api/verify-predictions?review=1 で取得できます。
+              </div>
+
+              <h3 style={{ fontSize: '14px', margin: '18px 0 8px' }}>信頼度（直近{REVIEW_DAYS * 2}日）</h3>
+              <div style={{ ...card, overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', fontVariantNumeric: 'tabular-nums' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '4px 8px 4px 0', fontWeight: 'normal', color: '#6b7280' }}>出した指数</th>
+                      {calibration.map((k) => (
+                        <th key={k.id} style={{ textAlign: 'right', padding: '4px 0 4px 8px', fontWeight: 'normal', color: '#6b7280' }}>{k.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calibration[0].rows.map((row, ri) => (
+                      <tr key={row.label} style={{ borderTop: '1px solid #efefec' }}>
+                        <td style={{ padding: '6px 8px 6px 0' }}>{row.label}</td>
+                        {calibration.map((k) => {
+                          const r = k.rows[ri];
+                          return (
+                            <td key={k.id} style={{ textAlign: 'right', padding: '6px 0 6px 8px' }}>
+                              {r.n === 0 ? '—' : `${r.goodRate}%`}
+                              <span style={{ color: '#6b7280', fontSize: '11px' }}>{r.n === 0 ? '' : `（${r.n}件）`}</span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ ...sub, marginTop: '8px' }}>
+                その指数を出した日のうち、結果が「良い（60以上）」だった割合。指数が高い帯ほど割合も高く、80〜95%の帯が8割以上なら指数は信頼できます。
+              </div>
+
+              <h3 style={{ fontSize: '14px', margin: '18px 0 8px' }}>外れた予測（直近{REVIEW_DAYS}日）</h3>
+              {misses.length === 0 ? (
+                <div style={{ ...card, ...sub }}>外れはありません</div>
+              ) : (
+                <div style={{ ...card, padding: '4px 14px' }}>
+                  {misses.map((m, i) => (
+                    <div key={i} style={{ padding: '8px 0', borderTop: i === 0 ? 'none' : '1px solid #efefec' }}>
+                      <div style={{ fontSize: '13px' }}>
+                        {fmtDate(m.date)} {KIND_LABEL[m.kind]} {m.name}：予測 {m.score}% → 結果 {m.observedScore}%
+                      </div>
+                      {m.inputs && (
+                        <div style={{ ...sub, wordBreak: 'break-word' }}>
+                          予測時の天気：{Object.entries(m.inputs).map(([k, v]) => `${INPUT_LABEL[k] || k} ${Array.isArray(v) ? v.join('/') : v}`).join('、')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <h3 style={{ fontSize: '14px', margin: '18px 0 8px' }}>富士山：ライブカメラ判定（直近7日）</h3>
+              {cameraRecs.length === 0 ? (
+                <div style={{ ...card, ...sub }}>まだ判定はありません（毎朝8:20に自動判定）</div>
+              ) : (
+                <div style={{ ...card, padding: '4px 14px' }}>
+                  {cameraRecs.flatMap((rec) => rec.items.map((it, i) => {
+                    const a = rec.actual[i];
+                    if (!a) return null;
+                    const hit = (it.score >= 60) === a.seen;
+                    return (
+                      <div key={`${rec.targetDate}:${i}`} style={{ padding: '8px 0', borderTop: '1px solid #efefec' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
+                          <div style={{ fontSize: '13px', minWidth: 0 }}>
+                            {fmtDate(rec.targetDate)} {it.name}：予測 {it.score}% → {a.seen ? '見えた' : '見えなかった'}
+                          </div>
+                          <Badge tone={hit ? 'green' : 'red'}>{hit ? '的中' : '外れ'}</Badge>
+                        </div>
+                        <div style={{ ...sub, wordBreak: 'break-word' }}>{[a.camera, a.reason].filter(Boolean).join(' ・ ')}</div>
+                      </div>
+                    );
+                  }))}
+                </div>
+              )}
+              <div style={{ ...sub, marginTop: '8px' }}>
+                上の的中率は予報モデルの解析値との比較で、実際に見えたかどうかではありません。
+                富士山は毎朝、自治体の公開ライブカメラの画像をAI（Gemini）で判定し、「実際に見えたか」として別枠で集計しています（指数60以上を「見える」予測とみなして比較）。
+              </div>
+            </>
+          )}
+        </Section>
+
+        <Section title="ミゴロン予報の答え合わせ（集計）">
           {!accuracy ? (
             <div style={card}>読み込みに失敗しました: {records.error}</div>
           ) : (

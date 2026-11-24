@@ -45,9 +45,10 @@ src/app/
                             X(旧Twitter)・Threads投稿(各アカウント・時間帯別)
     last-report/            直近の投稿結果確認用
     verify-predictions/     ミゴロン指数の答え合わせcron(毎晩22:40 JST)。投稿はしない
+    check-fuji-camera/      富士山が実際に見えたかをライブカメラ画像+Geminiで判定するcron(毎朝8:20 JST)
     shared-about/           about情報をpartyconnect等の他アプリと共有するAPI
 docs/
-  jake_images_ai_trends_plan.md, jake_images_x_handover.md, partyconnect_requirements.md
+  jake_images_ai_trends_plan.md, jake_images_x_handover.md, partyconnect_requirements.md, migoron_accuracy_review.md
 ```
 
 ### ページとmetadataの関係
@@ -85,7 +86,7 @@ docs/
 
 **稼働状況の記録(必須)**: 全cronルートは実際に投稿を試みた回の結果を`src/lib/job-status.js`の`recordJobStatus()`でRedis(`job_status:<id>`)に記録し、管理画面`/admin`に表示している。新しいcronを足すときは`JOBS`配列に登録し、成功時・失敗時(catch)の両方で`recordJobStatus()`を呼ぶこと(本日投稿済みスキップ・dry runでは呼ばない)。
 
-**ミゴロン指数(星空・雲海・富士山・花畑)の算出・文面・答え合わせ**: 点数は`src/app/api/_lib/migoron-scoring.js`がOpen-Meteoからコードで算出し(Geminiはメモ文のみ)、1行目のフックと「出現期待度」等の見出しは`migoron-format.js`が決める。実際に投稿した回は`src/lib/prediction-log.js`の`savePredictions()`で予測をRedisに保存し(dry runでは保存しない)、`/api/verify-predictions`が翌日以降に同じ式を実測に近い値で再計算して的中率・Brierスコアを`/admin`に出す。ミゴロンの指数を増やす・変えるときは、予測ログの種別(`KINDS`)と`observeScores()`も合わせて更新すること。詳細は`README.md`の「ミゴロン指数の算出・投稿文・答え合わせ」。
+**ミゴロン指数(星空・雲海・富士山・花畑)の算出・文面・答え合わせ**: 点数は`src/app/api/_lib/migoron-scoring.js`がOpen-Meteoからコードで算出し(Geminiはメモ文のみ)、1行目のフックと「出現期待度」等の見出しは`migoron-format.js`が決める。実際に投稿した回は`src/lib/prediction-log.js`の`savePredictions()`で予測をRedisに保存し(dry runでは保存しない)、`/api/verify-predictions`が翌日以降に同じ式を実測に近い値で再計算して的中率・Brierスコアを`/admin`に出す。ミゴロンの指数を増やす・変えるときは、予測ログの種別(`KINDS`)と`observeScores()`も合わせて更新すること。詳細は`README.md`の「ミゴロン指数の算出・投稿文・答え合わせ」。精度の合格ライン(`TARGETS`)・2週間ごとのレビュー手順・式の変更履歴は`docs/migoron_accuracy_review.md`にあり、記録はGitHub Actions(`migoron-monitoring.yml`)が`migoron-monitoring`ブランチ(mainではない)に毎日コミットしている。`migoron-scoring.js`の係数を変えたときは変更履歴に追記すること。
 
 それ以外の共通ヘルパーは無いため、新しいルートを足す際は以下を各ファイルにコピーする形で踏襲する:
 
