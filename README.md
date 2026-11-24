@@ -71,7 +71,7 @@ Motion Imaging の公式サイト（Next.js 16 / Vercel Hobby）と、SNS自動�
 
 指数（星空・雲海・富士山・花畑）の点数はGeminiではなく**コードで決まる**。Geminiが書くのは「ミゴロンメモ」の一文だけ。
 
-- **算出**: `src/app/api/_lib/migoron-scoring.js`（Open-Meteoの天気から計算。係数はここに集約）。スポットと花の見頃期間は `src/app/api/_lib/spots.json`。上限は95%。
+- **算出**: `src/app/api/_lib/migoron-scoring.js`（Open-Meteoの天気から計算。係数はここに集約）。スポットと花の見頃期間は `src/app/api/_lib/spots.json`。上限は95%。雲海は全国11か所の候補を毎日採点し、上位3か所だけを投稿する（`rankCloudSpots`）。
 - **投稿文（P5）**: `src/app/api/_lib/migoron-format.js`。1行目は点数から決まる結論型のフック（例「明日の朝、竹田城跡で雲海が出そう☁️」）。見出しの末尾に「出現期待度」（星空・雲海）／「見え期待度」（富士山）／「見頃期待度」（花畑）を付けて、%が何の数字か分かるようにしている。X の重み付き280字に収まるよう各routeの `plans` で段階的に削る。
 - **予測ログ（P4）**: 実際に投稿した回だけ、対象日・スポット・点数・元の天気要素をRedisの `pred:<star|cloud|fuji|flower>:<対象日>` に保存する（120日保持）。dry run では保存しない。
 - **答え合わせ（P4）**: `/api/verify-predictions`（毎晩22:40 JST）が、対象日が昨日以前で未検証の予測を、Open-Meteoの過去値から**同じ式で再計算**して判定する。対象日の7日前まで遡って再試行する。

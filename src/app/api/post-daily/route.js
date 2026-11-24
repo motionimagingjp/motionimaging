@@ -21,6 +21,10 @@
 //   富士山は5桁連番だが雲海は3桁連番のため、IMAGE_CATEGORIESに
 //   カテゴリごとのpad桁数を持たせて両対応にした。
 //
+// 2026-11-24 雲海の候補を3か所固定から全国11か所に拡大：
+//   毎日Open-Meteoで全候補を採点し、上位3か所を投稿する（rankCloudSpots）。
+//   予測ログ（答え合わせ）にも投稿した3か所だけを残す。
+//
 // 2026-10-15 改善指示書P1対応：
 //   スコアをGeminiの出力そのものから、src/app/api/_lib/migoron-scoring.js
 //   によるOpen-Meteo連動のコード計算に変更。スポットも固定座標リスト
@@ -33,7 +37,10 @@ import { TwitterApi } from 'twitter-api-v2';
 import { Redis } from '@upstash/redis';
 import { recordJobStatus } from '../../../lib/job-status';
 import { savePredictions } from '../../../lib/prediction-log';
-import { computeCloudAndFujiScores, CLOUD_SPOTS, FUJI_SPOTS, currentSeasonJST, seasonalIndices, jstDateString } from '../_lib/migoron-scoring';
+import {
+  computeCloudAndFujiScores, CLOUD_SPOTS, FUJI_SPOTS, CLOUD_DISPLAY_COUNT, rankCloudSpots,
+  currentSeasonJST, seasonalIndices, jstDateString,
+} from '../_lib/migoron-scoring';
 import { buildHook, SCORE_LABELS } from '../_lib/migoron-format';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -372,7 +379,8 @@ export async function GET(request) {
       fujiScores  = FUJI_SPOTS.map(s => ({ ...s, score: 50, ok: false }));
     }
 
-    const cloudRanked = cloudScores.slice().sort((a, b) => b.score - a.score);
+    // 雲海は全国の候補（spots.json）から、その日の上位3か所だけを投稿する
+    const cloudRanked = rankCloudSpots(cloudScores).slice(0, CLOUD_DISPLAY_COUNT);
     const fujiRanked  = fujiScores.slice().sort((a, b) => b.score - a.score);
     const cloudAvg = Math.round(cloudRanked.reduce((s, x) => s + x.score, 0) / cloudRanked.length);
     const fujiAvg  = Math.round(fujiRanked.reduce((s, x) => s + x.score, 0) / fujiRanked.length);
@@ -394,7 +402,11 @@ export async function GET(request) {
       return new Response(JSON.stringify({
         message: 'Dry run（投稿していません）',
         tweets: {
-          cloud_sea: { weighted: weightedLength(cloudSeaTweet), text: cloudSeaTweet, scores: cloudScores },
+          cloud_sea: {
+            weighted: weightedLength(cloudSeaTweet), text: cloudSeaTweet,
+            shown: cloudRanked.map(s => s.name),
+            scores: rankCloudSpots(cloudScores),
+          },
           fujisan:   { weighted: weightedLength(fujisanTweet),  text: fujisanTweet,  scores: fujiScores },
         },
         scoreSource,
@@ -442,7 +454,7 @@ export async function GET(request) {
           report.predictionLogged = report.predictionLogged || {};
           report.predictionLogged[key] = await savePredictions(
             key === 'cloud_sea' ? 'cloud' : 'fuji', jstDateString(1),
-            key === 'cloud_sea' ? cloudScores : fujiScores);
+            key === 'cloud_sea' ? cloudRanked : fujiScores);
         }
         if (photoMeta && photoMeta.uploaded) await redis.set(photoMeta.photoKey, photoMeta.index);
       } else if (r.duplicate) {
